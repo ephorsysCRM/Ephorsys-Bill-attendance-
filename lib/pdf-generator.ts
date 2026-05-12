@@ -1,4 +1,5 @@
-import puppeteer from 'puppeteer';
+import puppeteer from 'puppeteer-core';
+import chromium from '@sparticuz/chromium';
 
 const COMPANY_LOGO = 'https://res.cloudinary.com/devrmpo2p/image/upload/q_auto/f_auto/v1775475149/logo-BXdpNzpB_iqbjcp.png';
 
@@ -573,12 +574,26 @@ function buildHTML(data: InvoiceData) {
  * Generate PDF (optimized for single A4 page)
  */
 export async function generateInvoicePDF(data: InvoiceData) {
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox'],
-  });
+  let browser;
 
   try {
+    // Check if we are running on Vercel or in production
+    if (process.env.VERCEL || process.env.NODE_ENV === 'production') {
+      browser = await puppeteer.launch({
+        args: chromium.args,
+        defaultViewport: chromium.defaultViewport,
+        executablePath: await chromium.executablePath(),
+        headless: chromium.headless,
+      });
+    } else {
+      // Local development (Uses your local puppeteer)
+      const localPuppeteer = require('puppeteer');
+      browser = await localPuppeteer.launch({
+        headless: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox'],
+      });
+    }
+
     const page = await browser.newPage();
     const htmlContent = buildHTML(data);
 
@@ -608,8 +623,13 @@ export async function generateInvoicePDF(data: InvoiceData) {
 
     return pdf;
 
+  } catch (error) {
+    console.error('Puppeteer error:', error);
+    throw error;
   } finally {
-    await browser.close();
+    if (browser) {
+      await browser.close();
+    }
   }
 }
 
