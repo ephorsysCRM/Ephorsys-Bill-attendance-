@@ -3,6 +3,8 @@ import { connectDB } from '@/lib/mongodb';
 import { Invoice } from '@/lib/models';
 import { NextRequest, NextResponse } from 'next/server';
 
+export const dynamic = 'force-dynamic';
+
 function parseSequenceNumber(code: string) {
   // Try new format first: INVEPH-005/04/2026
   let match = code.match(/-(\d+)\//);

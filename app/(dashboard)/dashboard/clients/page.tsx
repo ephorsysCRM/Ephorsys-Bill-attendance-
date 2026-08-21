@@ -114,7 +114,7 @@ export default function ClientsPage() {
                 value={formData.email}
                 onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                 className="px-3 py-2 rounded-lg bg-secondary/50 border border-border text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-                required
+                // required
               />
               <input
                 type="tel"

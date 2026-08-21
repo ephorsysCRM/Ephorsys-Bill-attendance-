@@ -3,6 +3,8 @@ import { connectDB } from '@/lib/mongodb';
 import { Quotation } from '@/lib/models';
 import { NextRequest, NextResponse } from 'next/server';
 
+export const dynamic = 'force-dynamic';
+
 function parseSequenceNumber(code: string) {
   // Try new format first: QTEPH-002/03/2026
   let match = code.match(/-(\d+)\//);

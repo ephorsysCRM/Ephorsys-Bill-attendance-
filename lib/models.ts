@@ -14,7 +14,7 @@ export interface IUser extends Document {
 
 const UserSchema = new Schema<IUser>(
   {
-    email: { type: String, required: true, unique: true, lowercase: true },
+    email: { type: String, unique: true, lowercase: true },
     password: { type: String, required: true },
     name: { type: String, required: true },
     company: String,
@@ -42,7 +42,7 @@ const ClientSchema = new Schema<IClient>(
   {
     userId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     name: { type: String, required: true },
-    email: { type: String, required: true },
+    email: { type: String },
     phone: String,
     address: String,
     city: String,
@@ -64,6 +64,7 @@ export interface IQuotation extends Document {
     quantity: number;
     unitPrice: number;
     taxRate: number;
+    sacCode?: string;
   }>;
   notes?: string;
   status: 'draft' | 'sent' | 'accepted' | 'declined';
@@ -90,6 +91,7 @@ const QuotationSchema = new Schema<IQuotation>(
         quantity: Number,
         unitPrice: Number,
         taxRate: Number,
+        sacCode: String,
       },
     ],
     notes: String,
@@ -116,6 +118,7 @@ export interface IInvoice extends Document {
     quantity: number;
     unitPrice: number;
     taxRate: number;
+    sacCode?: string;
   }>;
   notes?: string;
   status: 'draft' | 'sent' | 'paid' | 'overdue';
@@ -125,7 +128,12 @@ export interface IInvoice extends Document {
   igstAmount: number;
   tax: number;
   total: number;
-  amountPaid?: number;
+  paidAmount?: number;
+  deposits?: Array<{
+    amount: number;
+    date: Date;
+    notes?: string;
+  }>;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -143,6 +151,7 @@ const InvoiceSchema = new Schema<IInvoice>(
         quantity: Number,
         unitPrice: Number,
         taxRate: Number,
+        sacCode: String,
       },
     ],
     notes: String,
@@ -153,7 +162,14 @@ const InvoiceSchema = new Schema<IInvoice>(
     igstAmount: { type: Number, default: 0 },
     tax: Number,
     total: Number,
-    amountPaid: { type: Number, default: 0 },
+    paidAmount: { type: Number, default: 0 },
+    deposits: [
+      {
+        amount: Number,
+        date: { type: Date, default: Date.now },
+        notes: String,
+      },
+    ],
   },
   { timestamps: true }
 );
@@ -209,7 +225,7 @@ export interface IAttendance extends Document {
   userId: mongoose.Types.ObjectId;
   employeeId: mongoose.Types.ObjectId;
   date: Date;
-  status: 'full-day' | 'half-day' | 'absent' | 'leave';
+  status: 'full-day' | 'half-day' | 'absent' | 'leave' | 'wfh';
   notes?: string;
   createdAt: Date;
   updatedAt: Date;
@@ -220,17 +236,20 @@ const AttendanceSchema = new Schema<IAttendance>(
     userId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     employeeId: { type: Schema.Types.ObjectId, ref: 'Employee', required: true },
     date: { type: Date, required: true },
-    status: { type: String, enum: ['full-day', 'half-day', 'absent', 'leave'], required: true },
+    status: { type: String, enum: ['full-day', 'half-day', 'absent', 'leave', 'wfh'], required: true },
     notes: String,
   },
   { timestamps: true }
 );
 
+// Clear mongoose models on hot-reload to prevent schema caching issues
+mongoose.models = {};
+
 // Export models
-export const User: Model<IUser> = mongoose.models.User || mongoose.model('User', UserSchema);
-export const Client: Model<IClient> = mongoose.models.Client || mongoose.model('Client', ClientSchema);
-export const Quotation: Model<IQuotation> = mongoose.models.Quotation || mongoose.model('Quotation', QuotationSchema);
-export const Invoice: Model<IInvoice> = mongoose.models.Invoice || mongoose.model('Invoice', InvoiceSchema);
-export const Settings: Model<ISettings> = mongoose.models.Settings || mongoose.model('Settings', SettingsSchema);
-export const Employee: Model<IEmployee> = mongoose.models.Employee || mongoose.model('Employee', EmployeeSchema);
-export const Attendance: Model<IAttendance> = mongoose.models.Attendance || mongoose.model('Attendance', AttendanceSchema);
+export const User: Model<IUser> = mongoose.model('User', UserSchema);
+export const Client: Model<IClient> = mongoose.model('Client', ClientSchema);
+export const Quotation: Model<IQuotation> = mongoose.model('Quotation', QuotationSchema);
+export const Invoice: Model<IInvoice> = mongoose.model('Invoice', InvoiceSchema);
+export const Settings: Model<ISettings> = mongoose.model('Settings', SettingsSchema);
+export const Employee: Model<IEmployee> = mongoose.model('Employee', EmployeeSchema);
+export const Attendance: Model<IAttendance> = mongoose.model('Attendance', AttendanceSchema);

@@ -13,6 +13,7 @@ interface QuotationItem {
   quantity: number;
   unitPrice: number;
   taxRate: number;
+  sacCode?: string;
 }
 
 interface QuotationFormProps {
@@ -42,7 +43,7 @@ export default function QuotationForm({ initialData, isEditing = false }: Quotat
   const [date, setDate] = useState(initialData?.date?.split('T')[0] || new Date().toISOString().split('T')[0]);
   const [dueDate, setDueDate] = useState(initialData?.dueDate?.split('T')[0] || '');
   const [notes, setNotes] = useState(initialData?.notes || '');
-  const [items, setItems] = useState<QuotationItem[]>(initialData?.items || [{ description: '', quantity: 1, unitPrice: 0, taxRate: 0 }]);
+  const [items, setItems] = useState<QuotationItem[]>(initialData?.items || [{ description: '', quantity: 1, unitPrice: 0, taxRate: 0, sacCode: '' }]);
   const [status, setStatus] = useState(initialData?.status || 'draft');
 
   useEffect(() => {
@@ -62,7 +63,7 @@ export default function QuotationForm({ initialData, isEditing = false }: Quotat
       if (initialData?.quotationNumber || isEditing) return;
 
       try {
-        const response = await fetch('/api/quotations/next');
+        const response = await fetch('/api/quotations/next', { cache: 'no-store' });
         if (response.ok) {
           const data = await response.json();
           if (data.nextQuotationNumber) {
@@ -88,13 +89,13 @@ export default function QuotationForm({ initialData, isEditing = false }: Quotat
 
   const subtotal = calculateSubtotal();
   const tax = calculateTax();
-  const cgstAmount = 0; // For inter-state transactions, CGST is 0
-  const sgstAmount = 0; // For inter-state transactions, SGST is 0
-  const igstAmount = tax; // IGST is the full tax amount
+  const cgstAmount = tax / 2; // split tax into CGST and SGST
+  const sgstAmount = tax / 2; // split tax into CGST and SGST
+  const igstAmount = 0; // IGST not used
   const total = subtotal + tax;
 
   const handleAddItem = () => {
-    setItems([...items, { description: '', quantity: 1, unitPrice: 0, taxRate: 0 }]);
+    setItems([...items, { description: '', quantity: 1, unitPrice: 0, taxRate: 0, sacCode: '' }]);
   };
 
   const handleRemoveItem = (index: number) => {
@@ -253,6 +254,7 @@ export default function QuotationForm({ initialData, isEditing = false }: Quotat
             <thead>
               <tr className="border-b border-border">
                 <th className="px-4 py-2 text-left text-sm font-medium">Description</th>
+                <th className="px-4 py-2 text-left text-sm font-medium min-w-[200px]">SAC</th>
                 <th className="px-4 py-2 text-right text-sm font-medium">Quantity</th>
                 <th className="px-4 py-2 text-right text-sm font-medium">Unit Price</th>
                 <th className="px-4 py-2 text-right text-sm font-medium">Tax %</th>
@@ -269,6 +271,19 @@ export default function QuotationForm({ initialData, isEditing = false }: Quotat
                       onChange={(e) => handleItemChange(index, 'description', e.target.value)}
                       placeholder="Item description"
                     />
+                  </td>
+                  <td className="px-4 py-2">
+                    <select
+                      value={(item as any).sacCode || ''}
+                      onChange={(e) => handleItemChange(index, 'sacCode', e.target.value)}
+                      className="w-full rounded-md border border-input bg-transparent text-foreground px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                    >
+                      <option value="">Select Code</option>
+                      <option value="998361">998361 - Advertising Services</option>
+                      <option value="998365">998365 - Online Ad Campaigns</option>
+                      <option value="998313">998313 - IT Consulting Services</option>
+                      <option value="998386">998386 - Social Media Marketing</option>
+                    </select>
                   </td>
                   <td className="px-4 py-2">
                     <Input
