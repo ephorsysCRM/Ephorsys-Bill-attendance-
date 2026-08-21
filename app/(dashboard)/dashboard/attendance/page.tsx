@@ -559,7 +559,6 @@ export default function AttendancePage() {
                   </div>
                 ) : (
                   <Calendar
-                    mode="default"
                     month={currentMonth}
                     onMonthChange={setCurrentMonth}
                     modifiers={{

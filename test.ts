@@ -1,5 +1,5 @@
-import { connectDB } from './lib/mongodb.ts';
-import { Invoice } from './lib/models.ts';
+import { connectDB } from './lib/mongodb';
+import { Invoice } from './lib/models';
 async function test() {
   await connectDB();
   const invoices = await Invoice.find().select('invoiceNumber').lean();

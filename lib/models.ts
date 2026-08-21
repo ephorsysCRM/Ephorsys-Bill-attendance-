@@ -242,14 +242,11 @@ const AttendanceSchema = new Schema<IAttendance>(
   { timestamps: true }
 );
 
-// Clear mongoose models on hot-reload to prevent schema caching issues
-mongoose.models = {};
-
 // Export models
-export const User: Model<IUser> = mongoose.model('User', UserSchema);
-export const Client: Model<IClient> = mongoose.model('Client', ClientSchema);
-export const Quotation: Model<IQuotation> = mongoose.model('Quotation', QuotationSchema);
-export const Invoice: Model<IInvoice> = mongoose.model('Invoice', InvoiceSchema);
-export const Settings: Model<ISettings> = mongoose.model('Settings', SettingsSchema);
-export const Employee: Model<IEmployee> = mongoose.model('Employee', EmployeeSchema);
-export const Attendance: Model<IAttendance> = mongoose.model('Attendance', AttendanceSchema);
+export const User: Model<IUser> = mongoose.models.User || mongoose.model<IUser>('User', UserSchema);
+export const Client: Model<IClient> = mongoose.models.Client || mongoose.model<IClient>('Client', ClientSchema);
+export const Quotation: Model<IQuotation> = mongoose.models.Quotation || mongoose.model<IQuotation>('Quotation', QuotationSchema);
+export const Invoice: Model<IInvoice> = mongoose.models.Invoice || mongoose.model<IInvoice>('Invoice', InvoiceSchema);
+export const Settings: Model<ISettings> = mongoose.models.Settings || mongoose.model<ISettings>('Settings', SettingsSchema);
+export const Employee: Model<IEmployee> = mongoose.models.Employee || mongoose.model<IEmployee>('Employee', EmployeeSchema);
+export const Attendance: Model<IAttendance> = mongoose.models.Attendance || mongoose.model<IAttendance>('Attendance', AttendanceSchema);
