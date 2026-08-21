@@ -13,6 +13,7 @@ interface InvoiceItem {
   quantity: number;
   unitPrice: number;
   taxRate: number;
+  sacCode?: string;
 }
 
 interface InvoiceFormProps {
@@ -42,8 +43,39 @@ export default function InvoiceForm({ initialData, isEditing = false }: InvoiceF
   const [date, setDate] = useState(initialData?.date?.split('T')[0] || new Date().toISOString().split('T')[0]);
   const [dueDate, setDueDate] = useState(initialData?.dueDate?.split('T')[0] || '');
   const [notes, setNotes] = useState(initialData?.notes || '');
-  const [items, setItems] = useState<InvoiceItem[]>(initialData?.items || [{ description: '', quantity: 1, unitPrice: 0, taxRate: 0 }]);
+  const [items, setItems] = useState<InvoiceItem[]>(initialData?.items || [{ description: '', quantity: 1, unitPrice: 0, taxRate: 0, sacCode: '' }]);
   const [status, setStatus] = useState(initialData?.status || 'draft');
+  
+  const [deposits, setDeposits] = useState<any[]>(() => {
+    if (initialData?.deposits && initialData.deposits.length > 0) {
+      return initialData.deposits.map((d: any) => ({
+        amount: d.amount,
+        date: new Date(d.date).toISOString().split('T')[0],
+        notes: d.notes || ''
+      }));
+    } else if (initialData?.paidAmount > 0) {
+      return [{
+        amount: initialData.paidAmount,
+        date: initialData.date ? initialData.date.split('T')[0] : new Date().toISOString().split('T')[0],
+        notes: 'Initial Payment'
+      }];
+    }
+    return [];
+  });
+
+  const addDeposit = () => {
+    setDeposits([...deposits, { amount: 0, date: new Date().toISOString().split('T')[0], notes: '' }]);
+  };
+
+  const removeDeposit = (index: number) => {
+    setDeposits(deposits.filter((_, i) => i !== index));
+  };
+
+  const handleDepositChange = (index: number, field: string, value: any) => {
+    const newDeposits = [...deposits];
+    newDeposits[index][field] = value;
+    setDeposits(newDeposits);
+  };
 
   useEffect(() => {
     const fetchClients = async () => {
@@ -62,7 +94,7 @@ export default function InvoiceForm({ initialData, isEditing = false }: InvoiceF
       if (initialData?.invoiceNumber || isEditing) return;
 
       try {
-        const response = await fetch('/api/invoices/next');
+        const response = await fetch('/api/invoices/next', { cache: 'no-store' });
         if (response.ok) {
           const data = await response.json();
           if (data.nextInvoiceNumber) {
@@ -88,13 +120,24 @@ export default function InvoiceForm({ initialData, isEditing = false }: InvoiceF
 
   const subtotal = calculateSubtotal();
   const tax = calculateTax();
-  const cgstAmount = 0; // For inter-state transactions, CGST is 0
-  const sgstAmount = 0; // For inter-state transactions, SGST is 0
-  const igstAmount = tax; // IGST is the full tax amount
+  const cgstAmount = tax / 2; // split tax into CGST and SGST
+  const sgstAmount = tax / 2; // split tax into CGST and SGST
+  const igstAmount = 0; // IGST not used
   const total = subtotal + tax;
 
+  const paidAmount = deposits.reduce((sum, dep) => sum + (dep.amount || 0), 0);
+  const balanceDue = total - paidAmount;
+
+  useEffect(() => {
+    if (total > 0 && balanceDue <= 0 && status !== 'paid') {
+      setStatus('paid');
+    } else if (total > 0 && balanceDue > 0 && status === 'paid') {
+      setStatus('sent');
+    }
+  }, [deposits, total, status, balanceDue]);
+
   const handleAddItem = () => {
-    setItems([...items, { description: '', quantity: 1, unitPrice: 0, taxRate: 0 }]);
+    setItems([...items, { description: '', quantity: 1, unitPrice: 0, taxRate: 0, sacCode: '' }]);
   };
 
   const handleRemoveItem = (index: number) => {
@@ -105,6 +148,7 @@ export default function InvoiceForm({ initialData, isEditing = false }: InvoiceF
     const newItems = [...items];
     (newItems[index] as any)[field] = value;
     setItems(newItems);
+    console.log(newItems[index]);
   };
 
   const handleClientCreated = (client: any) => {
@@ -137,6 +181,8 @@ export default function InvoiceForm({ initialData, isEditing = false }: InvoiceF
           igstAmount,
           tax,
           total,
+          paidAmount,
+          deposits,
         }),
       });
 
@@ -253,6 +299,7 @@ export default function InvoiceForm({ initialData, isEditing = false }: InvoiceF
             <thead>
               <tr className="border-b border-border">
                 <th className="px-4 py-2 text-left text-sm font-medium">Description</th>
+                <th className="px-4 py-2 text-left text-sm font-medium min-w-[200px]">SAC</th>
                 <th className="px-4 py-2 text-right text-sm font-medium">Quantity</th>
                 <th className="px-4 py-2 text-right text-sm font-medium">Unit Price</th>
                 <th className="px-4 py-2 text-right text-sm font-medium">Tax %</th>
@@ -269,6 +316,19 @@ export default function InvoiceForm({ initialData, isEditing = false }: InvoiceF
                       onChange={(e) => handleItemChange(index, 'description', e.target.value)}
                       placeholder="Item description"
                     />
+                  </td>
+                  <td className="px-4 py-2">
+                    <select
+                      value={(item as any).sacCode || ''}
+                      onChange={(e) => handleItemChange(index, 'sacCode', e.target.value)}
+                      className="w-full rounded-md border border-input bg-transparent text-foreground px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                    >
+                      <option value="">Select Code</option>
+                      <option value="998361">998361 - Advertising Services</option>
+                      <option value="998365">998365 - Online Ad Campaigns</option>
+                      <option value="998313">998313 - IT Consulting Services</option>
+                      <option value="998386">998386 - Social Media Marketing</option>
+                    </select>
                   </td>
                   <td className="px-4 py-2">
                     <Input
@@ -349,6 +409,52 @@ export default function InvoiceForm({ initialData, isEditing = false }: InvoiceF
             <div className="border-t border-border pt-3 flex justify-between">
               <span className="font-semibold">Total:</span>
               <span className="text-xl font-bold text-accent">₹{total.toFixed(2)}</span>
+            </div>
+            
+            <div className="border-t border-border pt-4 mt-4">
+              <div className="flex justify-between items-center mb-3">
+                <h3 className="font-semibold text-sm">Deposit History</h3>
+                <Button type="button" variant="outline" size="sm" onClick={addDeposit} className="h-7 px-2 text-xs">
+                  <Plus className="w-3 h-3 mr-1" /> Add
+                </Button>
+              </div>
+              {deposits.map((deposit, index) => (
+                <div key={index} className="flex gap-2 mb-2 items-center text-sm">
+                  <Input 
+                    type="date" 
+                    value={deposit.date} 
+                    onChange={(e) => handleDepositChange(index, 'date', e.target.value)}
+                    className="w-[120px] bg-black border-input h-8 px-2 text-xs"
+                  />
+                  <Input 
+                    type="number" 
+                    value={deposit.amount || ''} 
+                    onChange={(e) => handleDepositChange(index, 'amount', parseFloat(e.target.value) || 0)}
+                    placeholder="Amount"
+                    className="w-24 text-right bg-black border-input h-8 px-2 text-xs"
+                    min="0"
+                    step="0.01"
+                  />
+                  <Input 
+                    value={deposit.notes} 
+                    onChange={(e) => handleDepositChange(index, 'notes', e.target.value)}
+                    placeholder="Notes (optional)"
+                    className="flex-1 bg-black border-input h-8 px-2 text-xs"
+                  />
+                  <button type="button" onClick={() => removeDeposit(index)} className="text-destructive p-1 hover:bg-destructive/20 rounded transition-colors">
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              ))}
+              
+              <div className="flex justify-between items-center text-sm pt-4 mt-2 border-t border-border/50">
+                <span className="text-muted-foreground">Total Paid:</span>
+                <span className="font-medium text-green-500">₹{paidAmount.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between text-sm pt-2 text-destructive font-semibold">
+                <span>Balance Due:</span>
+                <span>₹{balanceDue.toFixed(2)}</span>
+              </div>
             </div>
           </div>
         </Card>

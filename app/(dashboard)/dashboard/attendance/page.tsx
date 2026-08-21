@@ -26,7 +26,7 @@ interface Employee {
 
 interface AttendanceRecord {
   employeeId: string;
-  status: 'full-day' | 'half-day' | 'absent' | 'leave';
+  status: 'full-day' | 'half-day' | 'absent' | 'leave' | 'wfh';
   notes?: string;
 }
 
@@ -97,7 +97,7 @@ export default function AttendancePage() {
     }
   };
 
-  const handleStatusChange = (employeeId: string, status: 'full-day' | 'half-day' | 'absent' | 'leave') => {
+  const handleStatusChange = (employeeId: string, status: 'full-day' | 'half-day' | 'absent' | 'leave' | 'wfh') => {
     setAttendance((prev) => ({
       ...prev,
       [employeeId]: {
@@ -199,12 +199,14 @@ export default function AttendancePage() {
 
   const calculateCounts = () => {
     let present = 0;
+    let wfh = 0;
     let absent = 0;
     let leave = 0;
     let halfDay = 0;
 
     monthlyAttendance.forEach((rec) => {
       if (rec.status === 'full-day') present++;
+      else if (rec.status === 'wfh') wfh++;
       else if (rec.status === 'half-day') halfDay++;
       else if (rec.status === 'absent') absent++;
       else if (rec.status === 'leave') leave++;
@@ -212,6 +214,7 @@ export default function AttendancePage() {
 
     return {
       present: present + halfDay * 0.5,
+      wfh,
       absent,
       leave,
       halfDay,
@@ -225,6 +228,8 @@ export default function AttendancePage() {
         return <Badge className="bg-emerald-500 text-white hover:bg-emerald-600">Full Day</Badge>;
       case 'half-day':
         return <Badge className="bg-amber-500 text-white hover:bg-amber-600">Half Day</Badge>;
+      case 'wfh':
+        return <Badge className="bg-purple-500 text-white hover:bg-purple-600">WFH</Badge>;
       case 'absent':
         return <Badge className="bg-red-500 text-white hover:bg-red-600">Absent</Badge>;
       case 'leave':
@@ -332,6 +337,14 @@ export default function AttendancePage() {
                                 onClick={() => handleStatusChange(emp._id, 'half-day')}
                               >
                                 Half
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant={currentStatus === 'wfh' ? 'default' : 'outline'}
+                                className={cn(currentStatus === 'wfh' && 'bg-purple-500 hover:bg-purple-600 text-white')}
+                                onClick={() => handleStatusChange(emp._id, 'wfh')}
+                              >
+                                WFH
                               </Button>
                               <Button
                                 size="sm"
@@ -546,18 +559,19 @@ export default function AttendancePage() {
                   </div>
                 ) : (
                   <Calendar
-                    mode="default"
                     month={currentMonth}
                     onMonthChange={setCurrentMonth}
                     modifiers={{
                       present: monthlyAttendance.filter(r => r.status === 'full-day').map(r => new Date(r.date)),
                       halfDay: monthlyAttendance.filter(r => r.status === 'half-day').map(r => new Date(r.date)),
+                      wfh: monthlyAttendance.filter(r => r.status === 'wfh').map(r => new Date(r.date)),
                       absent: monthlyAttendance.filter(r => r.status === 'absent').map(r => new Date(r.date)),
                       leave: monthlyAttendance.filter(r => r.status === 'leave').map(r => new Date(r.date)),
                     }}
                     modifiersStyles={{
                       present: { backgroundColor: '#10b981', color: 'white', borderRadius: '50%' },
                       halfDay: { backgroundColor: '#f59e0b', color: 'white', borderRadius: '50%' },
+                      wfh: { backgroundColor: '#a855f7', color: 'white', borderRadius: '50%' },
                       absent: { backgroundColor: '#ef4444', color: 'white', borderRadius: '50%' },
                       leave: { backgroundColor: '#3b82f6', color: 'white', borderRadius: '50%' },
                     }}
@@ -574,27 +588,32 @@ export default function AttendancePage() {
                     <Loader2 className="w-6 h-6 animate-spin text-primary" />
                   </div>
                 ) : (
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-2 gap-3">
                     {(() => {
                       const counts = calculateCounts();
                       return (
                         <>
-                          <Card className="p-4 bg-background/50 border-emerald-500/20">
-                            <div className="text-sm text-muted-foreground">Present</div>
-                            <div className="text-2xl font-bold text-emerald-500">{counts.present}</div>
-                            <div className="text-xs text-muted-foreground">{counts.halfDay} half days</div>
+                          <Card className="p-3 bg-background/50 border-emerald-500/20">
+                            <div className="text-xs text-muted-foreground">Present</div>
+                            <div className="text-xl font-bold text-emerald-500">{counts.present}</div>
+                            <div className="text-[10px] text-muted-foreground">{counts.halfDay} half days</div>
                           </Card>
-                          <Card className="p-4 bg-background/50 border-red-500/20">
-                            <div className="text-sm text-muted-foreground">Absent</div>
-                            <div className="text-2xl font-bold text-red-500">{counts.absent}</div>
+                          <Card className="p-3 bg-background/50 border-purple-500/20">
+                            <div className="text-xs text-muted-foreground">WFH</div>
+                            <div className="text-xl font-bold text-purple-500">{counts.wfh}</div>
+                            <div className="text-[10px] text-muted-foreground">Work From Home</div>
                           </Card>
-                          <Card className="p-4 bg-background/50 border-blue-500/20">
-                            <div className="text-sm text-muted-foreground">Leave</div>
-                            <div className="text-2xl font-bold text-blue-500">{counts.leave}</div>
+                          <Card className="p-3 bg-background/50 border-red-500/20">
+                            <div className="text-xs text-muted-foreground">Absent</div>
+                            <div className="text-xl font-bold text-red-500">{counts.absent}</div>
                           </Card>
-                          <Card className="p-4 bg-background/50 border-sidebar-border">
-                            <div className="text-sm text-muted-foreground">Total Marked</div>
-                            <div className="text-2xl font-bold text-foreground">{counts.total}</div>
+                          <Card className="p-3 bg-background/50 border-blue-500/20">
+                            <div className="text-xs text-muted-foreground">Leave</div>
+                            <div className="text-xl font-bold text-blue-500">{counts.leave}</div>
+                          </Card>
+                          <Card className="p-3 bg-background/50 border-sidebar-border col-span-2">
+                            <div className="text-xs text-muted-foreground">Total Marked</div>
+                            <div className="text-xl font-bold text-foreground">{counts.total}</div>
                           </Card>
                         </>
                       );
@@ -605,7 +624,7 @@ export default function AttendancePage() {
                 {/* Legend */}
                 <div className="space-y-2">
                   <h4 className="text-sm font-semibold text-foreground">Legend</h4>
-                  <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div className="grid grid-cols-3 gap-2 text-xs">
                     <div className="flex items-center gap-2">
                       <span className="w-3 h-3 bg-emerald-500 rounded-full"></span>
                       <span>Full Day</span>
@@ -613,6 +632,10 @@ export default function AttendancePage() {
                     <div className="flex items-center gap-2">
                       <span className="w-3 h-3 bg-amber-500 rounded-full"></span>
                       <span>Half Day</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="w-3 h-3 bg-purple-500 rounded-full"></span>
+                      <span>WFH</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="w-3 h-3 bg-red-500 rounded-full"></span>

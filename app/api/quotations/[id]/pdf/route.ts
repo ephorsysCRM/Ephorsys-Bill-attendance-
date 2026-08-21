@@ -31,8 +31,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       clientName: (quotation.clientId as any)?.name || 'Unknown',
       clientEmail: (quotation.clientId as any)?.email,
       clientAddress: (quotation.clientId as any)?.address,
+      clientGSTIN: (quotation.clientId as any)?.taxNumber,
+      GSTIN: (quotation.clientId as any)?.taxNumber,
       items: quotation.items,
       subtotal: quotation.subtotal,
+      taxableAmount: quotation.subtotal,
       cgst: 0,
       sgst: 0,
       igst: quotation.igstAmount > 0 ? 18 : 0, // Assuming 18% IGST

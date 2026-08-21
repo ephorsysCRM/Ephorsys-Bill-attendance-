@@ -40,7 +40,7 @@ export async function POST(req: NextRequest) {
     await connectDB();
 
     const body = await req.json();
-    const { clientId, invoiceNumber, date, dueDate, items, notes, status, subtotal, cgstAmount, sgstAmount, igstAmount, tax, total } = body;
+    const { clientId, invoiceNumber, date, dueDate, items, notes, status, subtotal, cgstAmount, sgstAmount, igstAmount, tax, total, paidAmount, deposits } = body;
 
     const invoice = await Invoice.create({
       userId: session.userId,
@@ -57,6 +57,8 @@ export async function POST(req: NextRequest) {
       igstAmount,
       tax,
       total,
+      paidAmount,
+      deposits,
     });
 
     return NextResponse.json(invoice, { status: 201 });
