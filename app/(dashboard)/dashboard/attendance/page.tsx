@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -11,8 +11,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { format, startOfMonth, endOfMonth } from 'date-fns';
-import { Plus, Calendar as CalendarIcon, Check, X, Clock, User, Save, Loader2, Edit, Trash2, Eye } from 'lucide-react';
+import { format, isSameMonth, isSameYear } from 'date-fns';
+import { Plus, Calendar as CalendarIcon, Check, X, Clock, User, Save, Loader2, Edit, Trash2, Eye, Sun, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 
@@ -24,9 +24,11 @@ interface Employee {
   empType: string;
 }
 
+export type AttendanceStatus = 'full-day' | 'half-day' | 'absent' | 'leave' | 'wfh' | 'holiday';
+
 interface AttendanceRecord {
   employeeId: string;
-  status: 'full-day' | 'half-day' | 'absent' | 'leave' | 'wfh';
+  status?: AttendanceStatus;
   notes?: string;
 }
 
@@ -50,6 +52,10 @@ export default function AttendancePage() {
   const [currentMonth, setCurrentMonth] = useState<Date>(new Date());
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
+  
+  // Interactive day selection in monthly dialog
+  const [selectedDialogDate, setSelectedDialogDate] = useState<Date | undefined>(undefined);
+  const [actionLoading, setActionLoading] = useState(false);
 
   useEffect(() => {
     fetchEmployees();
@@ -78,7 +84,8 @@ export default function AttendancePage() {
 
   const fetchAttendance = async (selectedDate: Date) => {
     try {
-      const res = await fetch(`/api/attendance?date=${selectedDate.toISOString()}`);
+      const dateStr = format(selectedDate, 'yyyy-MM-dd');
+      const res = await fetch(`/api/attendance?date=${dateStr}`);
       if (res.ok) {
         const data = await res.json();
         const attMap: Record<string, AttendanceRecord> = {};
@@ -97,32 +104,119 @@ export default function AttendancePage() {
     }
   };
 
-  const handleStatusChange = (employeeId: string, status: 'full-day' | 'half-day' | 'absent' | 'leave' | 'wfh') => {
-    setAttendance((prev) => ({
-      ...prev,
-      [employeeId]: {
-        ...prev[employeeId],
-        employeeId,
-        status,
-      },
-    }));
+  const isDayHoliday = employees.length > 0 && employees.every((emp) => attendance[emp._id]?.status === 'holiday');
+
+  const handleToggleDayHoliday = async () => {
+    if (employees.length === 0) return;
+    const dateStr = format(date, 'yyyy-MM-dd');
+    const willBeHoliday = !isDayHoliday;
+    setSaving(true);
+    try {
+      if (willBeHoliday) {
+        const res = await fetch('/api/attendance', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            date: dateStr,
+            isHoliday: true,
+          }),
+        });
+        if (res.ok) {
+          toast.success(`Marked all employees as Holiday for ${format(date, 'dd MMM yyyy')}`);
+          await fetchAttendance(date);
+        } else {
+          toast.error('Failed to mark holiday');
+        }
+      } else {
+        const res = await fetch(`/api/attendance?date=${dateStr}`, {
+          method: 'DELETE',
+        });
+        if (res.ok) {
+          toast.success(`Removed Holiday for ${format(date, 'dd MMM yyyy')}`);
+          await fetchAttendance(date);
+        } else {
+          toast.error('Failed to remove holiday');
+        }
+      }
+    } catch (error) {
+      console.error('Holiday toggle error:', error);
+      toast.error('Failed to update holiday');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleStatusChange = (employeeId: string, status: AttendanceStatus) => {
+    if (status === 'holiday') {
+      // Company-wide holiday applies to ALL employees for that date
+      const currentIsHoliday = attendance[employeeId]?.status === 'holiday';
+      if (currentIsHoliday) {
+        // Toggle off
+        setAttendance({});
+        toast.info(`Cleared holiday for ${format(date, 'dd MMM yyyy')}. Click "Save Attendance" to commit.`);
+      } else {
+        const allHoliday: Record<string, AttendanceRecord> = {};
+        employees.forEach((emp) => {
+          allHoliday[emp._id] = {
+            employeeId: emp._id,
+            status: 'holiday',
+          };
+        });
+        setAttendance(allHoliday);
+        toast.info(`Marked all employees as Holiday for ${format(date, 'dd MMM yyyy')}. Click "Save Attendance" to commit.`);
+      }
+      return;
+    }
+
+    setAttendance((prev) => {
+      const current = prev[employeeId]?.status;
+      // If clicking the active status again, toggle off (clear)
+      if (current === status) {
+        const updated = { ...prev };
+        delete updated[employeeId];
+        return updated;
+      }
+      return {
+        ...prev,
+        [employeeId]: {
+          ...prev[employeeId],
+          employeeId,
+          status,
+        },
+      };
+    });
+  };
+
+  const handleClearEmployeeAttendance = (employeeId: string) => {
+    setAttendance((prev) => {
+      const updated = { ...prev };
+      delete updated[employeeId];
+      return updated;
+    });
+    toast.info('Attendance cleared for this employee. Click "Save Attendance" to commit changes.');
   };
 
   const handleSaveAttendance = async () => {
     setSaving(true);
     try {
-      const records = Object.values(attendance);
+      const records = Object.values(attendance).filter((r) => r.status);
+      const dateStr = format(date, 'yyyy-MM-dd');
+      const isAllHoliday = employees.length > 0 && employees.every((emp) => attendance[emp._id]?.status === 'holiday');
+
       const res = await fetch('/api/attendance', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          date: date.toISOString(),
+          date: dateStr,
+          isHoliday: isAllHoliday,
           records,
         }),
       });
 
       if (res.ok) {
         toast.success('Attendance saved successfully');
+        // Instantly refresh from server to ensure state and badges match DB
+        await fetchAttendance(date);
       } else {
         toast.error('Failed to save attendance');
       }
@@ -174,6 +268,7 @@ export default function AttendancePage() {
 
   const handleViewEmployeeSummary = async (emp: Employee) => {
     setSelectedEmployee(emp);
+    setSelectedDialogDate(undefined);
     setIsDialogOpen(true);
     fetchMonthlyAttendance(emp._id, currentMonth);
   };
@@ -181,13 +276,18 @@ export default function AttendancePage() {
   const fetchMonthlyAttendance = async (empId: string, month: Date) => {
     setLoadingMonthly(true);
     try {
-      const startDate = startOfMonth(month);
-      const endDate = endOfMonth(month);
+      const year = month.getFullYear();
+      const monthIndex = month.getMonth();
+      const startDate = new Date(year, monthIndex, 1);
+      const endDate = new Date(year, monthIndex + 1, 0);
       
-      const res = await fetch(`/api/attendance?employeeId=${empId}&startDate=${startDate.toISOString()}&endDate=${endDate.toISOString()}`);
+      const startDateStr = format(startDate, 'yyyy-MM-dd');
+      const endDateStr = format(endDate, 'yyyy-MM-dd');
+      
+      const res = await fetch(`/api/attendance?employeeId=${empId}&startDate=${startDateStr}&endDate=${endDateStr}`);
       if (res.ok) {
         const data = await res.json();
-        setMonthlyAttendance(data.attendance);
+        setMonthlyAttendance(data.attendance || []);
       }
     } catch (error) {
       console.error('Failed to fetch monthly attendance:', error);
@@ -197,19 +297,30 @@ export default function AttendancePage() {
     }
   };
 
-  const calculateCounts = () => {
+  // Strictly calculate counts for the respective month ONLY
+  const calculateCounts = useMemo(() => {
     let present = 0;
     let wfh = 0;
     let absent = 0;
     let leave = 0;
+    let holiday = 0;
     let halfDay = 0;
 
-    monthlyAttendance.forEach((rec) => {
+    const targetYear = currentMonth.getFullYear();
+    const targetMonth = currentMonth.getMonth();
+
+    const isolatedRecords = monthlyAttendance.filter((rec) => {
+      const d = new Date(rec.date);
+      return d.getFullYear() === targetYear && d.getMonth() === targetMonth;
+    });
+
+    isolatedRecords.forEach((rec) => {
       if (rec.status === 'full-day') present++;
       else if (rec.status === 'wfh') wfh++;
       else if (rec.status === 'half-day') halfDay++;
       else if (rec.status === 'absent') absent++;
       else if (rec.status === 'leave') leave++;
+      else if (rec.status === 'holiday') holiday++;
     });
 
     return {
@@ -217,9 +328,92 @@ export default function AttendancePage() {
       wfh,
       absent,
       leave,
+      holiday,
       halfDay,
-      total: monthlyAttendance.length,
+      total: isolatedRecords.length,
     };
+  }, [monthlyAttendance, currentMonth]);
+
+  // Current month isolated records for calendar rendering
+  const currentMonthRecords = useMemo(() => {
+    const targetYear = currentMonth.getFullYear();
+    const targetMonth = currentMonth.getMonth();
+    return monthlyAttendance.filter((rec) => {
+      const d = new Date(rec.date);
+      return d.getFullYear() === targetYear && d.getMonth() === targetMonth;
+    });
+  }, [monthlyAttendance, currentMonth]);
+
+  const markedDateStrings = useMemo(() => {
+    return new Set(currentMonthRecords.map((r) => format(new Date(r.date), 'yyyy-MM-dd')));
+  }, [currentMonthRecords]);
+
+  // Handle setting or removing attendance directly from the dialog
+  const handleDialogUpdateStatus = async (status: AttendanceStatus | null) => {
+    if (!selectedEmployee || !selectedDialogDate) return;
+    setActionLoading(true);
+    const dateStr = format(selectedDialogDate, 'yyyy-MM-dd');
+    try {
+      if (status === null) {
+        // Remove attendance
+        const res = await fetch(`/api/attendance?employeeId=${selectedEmployee._id}&date=${dateStr}`, {
+          method: 'DELETE',
+        });
+        if (res.ok) {
+          toast.success(`Attendance removed for ${format(selectedDialogDate, 'dd MMM yyyy')}`);
+          await fetchMonthlyAttendance(selectedEmployee._id, currentMonth);
+          if (format(date, 'yyyy-MM-dd') === dateStr) {
+            fetchAttendance(date);
+          }
+        } else {
+          toast.error('Failed to remove attendance');
+        }
+      } else if (status === 'holiday') {
+        // A date marked as holiday applies to ALL employees
+        const res = await fetch('/api/attendance', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            date: dateStr,
+            isHoliday: true,
+          }),
+        });
+        if (res.ok) {
+          toast.success(`Date ${format(selectedDialogDate, 'dd MMM yyyy')} marked as Holiday for all employees`);
+          await fetchMonthlyAttendance(selectedEmployee._id, currentMonth);
+          if (format(date, 'yyyy-MM-dd') === dateStr) {
+            await fetchAttendance(date);
+          }
+        } else {
+          toast.error('Failed to mark holiday');
+        }
+      } else {
+        // Set new status
+        const res = await fetch('/api/attendance', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            employeeId: selectedEmployee._id,
+            date: dateStr,
+            status,
+          }),
+        });
+        if (res.ok) {
+          toast.success(`Marked as ${status} for ${format(selectedDialogDate, 'dd MMM yyyy')}`);
+          await fetchMonthlyAttendance(selectedEmployee._id, currentMonth);
+          if (format(date, 'yyyy-MM-dd') === dateStr) {
+            fetchAttendance(date);
+          }
+        } else {
+          toast.error('Failed to update attendance');
+        }
+      }
+    } catch (error) {
+      console.error('Error updating dialog attendance:', error);
+      toast.error('Something went wrong');
+    } finally {
+      setActionLoading(false);
+    }
   };
 
   const getStatusBadge = (status?: string) => {
@@ -234,17 +428,26 @@ export default function AttendancePage() {
         return <Badge className="bg-red-500 text-white hover:bg-red-600">Absent</Badge>;
       case 'leave':
         return <Badge className="bg-blue-500 text-white hover:bg-blue-600">Leave</Badge>;
+      case 'holiday':
+        return <Badge className="bg-cyan-500 text-white hover:bg-cyan-600">Holiday</Badge>;
       default:
-        return <Badge variant="outline">Not Marked</Badge>;
+        return <Badge variant="outline" className="text-muted-foreground border-border">Not Marked</Badge>;
     }
   };
+
+  // Check dialog date record
+  const selectedDialogDateStr = selectedDialogDate ? format(selectedDialogDate, 'yyyy-MM-dd') : '';
+  const selectedDialogRecord = currentMonthRecords.find(
+    (r) => format(new Date(r.date), 'yyyy-MM-dd') === selectedDialogDateStr
+  );
+  const isSelectedDialogSunday = selectedDialogDate?.getDay() === 0;
 
   return (
     <div className="p-8 space-y-8">
       {/* Header */}
       <div>
         <h1 className="text-4xl font-bold text-foreground mb-2">Attendance Module</h1>
-        <p className="text-muted-foreground">Manage employees and track daily attendance.</p>
+        <p className="text-muted-foreground">Manage employees, track daily attendance, and view isolated monthly records.</p>
       </div>
 
       <Tabs defaultValue="attendance" className="space-y-6">
@@ -257,7 +460,7 @@ export default function AttendancePage() {
         <TabsContent value="attendance" className="space-y-6">
           <Card className="glass-card p-6">
             <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 mb-6">
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3 flex-wrap">
                 <Popover>
                   <PopoverTrigger asChild>
                     <Button variant="outline" className="w-[240px] justify-start text-left font-normal bg-background/50">
@@ -272,12 +475,35 @@ export default function AttendancePage() {
                 <div className="text-sm text-muted-foreground">
                   Marking attendance for <span className="font-semibold text-foreground">{format(date, 'dd MMM yyyy')}</span>
                 </div>
+                {isDayHoliday && (
+                  <Badge className="bg-cyan-500 text-white hover:bg-cyan-600 font-semibold px-2.5 py-1">
+                    ✨ Company Holiday
+                  </Badge>
+                )}
               </div>
 
-              <Button onClick={handleSaveAttendance} disabled={saving} className="bg-primary hover:bg-primary/90 text-primary-foreground">
-                {saving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
-                Save Attendance
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant={isDayHoliday ? "default" : "outline"}
+                  onClick={handleToggleDayHoliday}
+                  disabled={saving}
+                  className={cn(
+                    "transition-all font-medium",
+                    isDayHoliday 
+                      ? "bg-cyan-500 hover:bg-cyan-600 text-white font-semibold shadow-sm" 
+                      : "border-cyan-500/40 text-cyan-400 hover:bg-cyan-500/10 hover:border-cyan-500/60"
+                  )}
+                >
+                  <Sun className="w-4 h-4 mr-2" />
+                  {isDayHoliday ? "Holiday (Marked for All)" : "Mark Day as Holiday"}
+                </Button>
+
+                <Button onClick={handleSaveAttendance} disabled={saving} className="bg-primary hover:bg-primary/90 text-primary-foreground">
+                  {saving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+                  Save Attendance
+                </Button>
+              </div>
             </div>
 
             {loading ? (
@@ -321,11 +547,14 @@ export default function AttendancePage() {
                           <TableCell>{emp.empType}</TableCell>
                           <TableCell>{getStatusBadge(currentStatus)}</TableCell>
                           <TableCell className="text-right">
-                            <div className="flex justify-end gap-2">
+                            <div className="flex justify-end items-center gap-1.5 flex-wrap">
                               <Button
                                 size="sm"
                                 variant={currentStatus === 'full-day' ? 'default' : 'outline'}
-                                className={cn(currentStatus === 'full-day' && 'bg-emerald-500 hover:bg-emerald-600 text-white')}
+                                className={cn(
+                                  'h-8 px-2.5 text-xs font-medium',
+                                  currentStatus === 'full-day' && 'bg-emerald-500 hover:bg-emerald-600 text-white'
+                                )}
                                 onClick={() => handleStatusChange(emp._id, 'full-day')}
                               >
                                 Full
@@ -333,7 +562,10 @@ export default function AttendancePage() {
                               <Button
                                 size="sm"
                                 variant={currentStatus === 'half-day' ? 'default' : 'outline'}
-                                className={cn(currentStatus === 'half-day' && 'bg-amber-500 hover:bg-amber-600 text-white')}
+                                className={cn(
+                                  'h-8 px-2.5 text-xs font-medium',
+                                  currentStatus === 'half-day' && 'bg-amber-500 hover:bg-amber-600 text-white'
+                                )}
                                 onClick={() => handleStatusChange(emp._id, 'half-day')}
                               >
                                 Half
@@ -341,7 +573,10 @@ export default function AttendancePage() {
                               <Button
                                 size="sm"
                                 variant={currentStatus === 'wfh' ? 'default' : 'outline'}
-                                className={cn(currentStatus === 'wfh' && 'bg-purple-500 hover:bg-purple-600 text-white')}
+                                className={cn(
+                                  'h-8 px-2.5 text-xs font-medium',
+                                  currentStatus === 'wfh' && 'bg-purple-500 hover:bg-purple-600 text-white'
+                                )}
                                 onClick={() => handleStatusChange(emp._id, 'wfh')}
                               >
                                 WFH
@@ -349,11 +584,47 @@ export default function AttendancePage() {
                               <Button
                                 size="sm"
                                 variant={currentStatus === 'leave' ? 'default' : 'outline'}
-                                className={cn(currentStatus === 'leave' && 'bg-blue-500 hover:bg-blue-600 text-white')}
+                                className={cn(
+                                  'h-8 px-2.5 text-xs font-medium',
+                                  currentStatus === 'leave' && 'bg-blue-500 hover:bg-blue-600 text-white'
+                                )}
                                 onClick={() => handleStatusChange(emp._id, 'leave')}
                               >
                                 Leave
                               </Button>
+                              <Button
+                                size="sm"
+                                variant={currentStatus === 'absent' ? 'default' : 'outline'}
+                                className={cn(
+                                  'h-8 px-2.5 text-xs font-medium',
+                                  currentStatus === 'absent' && 'bg-red-500 hover:bg-red-600 text-white'
+                                )}
+                                onClick={() => handleStatusChange(emp._id, 'absent')}
+                              >
+                                Absent
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant={currentStatus === 'holiday' ? 'default' : 'outline'}
+                                className={cn(
+                                  'h-8 px-2.5 text-xs font-medium',
+                                  currentStatus === 'holiday' && 'bg-cyan-500 hover:bg-cyan-600 text-white'
+                                )}
+                                onClick={() => handleStatusChange(emp._id, 'holiday')}
+                              >
+                                Holiday
+                              </Button>
+                              {currentStatus && (
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-8 px-2 text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                                  onClick={() => handleClearEmployeeAttendance(emp._id)}
+                                  title="Clear attendance"
+                                >
+                                  <X className="w-3.5 h-3.5" />
+                                </Button>
+                              )}
                             </div>
                           </TableCell>
                         </TableRow>
@@ -505,24 +776,27 @@ export default function AttendancePage() {
 
       {/* Monthly Summary Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="max-w-3xl bg-background/95 backdrop-blur-md border border-sidebar-border">
+        <DialogContent className="w-[95vw] sm:max-w-4xl md:max-w-5xl lg:max-w-6xl xl:max-w-7xl max-h-[92vh] overflow-y-auto bg-background/95 backdrop-blur-md border border-sidebar-border p-6 shadow-2xl">
           <DialogHeader>
             <DialogTitle className="text-2xl font-bold flex items-center gap-2">
               <User className="w-6 h-6 text-primary" />
               {selectedEmployee?.name} Summary
             </DialogTitle>
             <DialogDescription>
-              Monthly attendance overview for {selectedEmployee?.empId}
+              Monthly attendance overview for {selectedEmployee?.empId} ({selectedEmployee?.designation})
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-6 mt-4">
             {/* Month Selector */}
-            <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-foreground">
-                {format(currentMonth, 'MMMM yyyy')}
-              </h3>
-              <div className="flex gap-2">
+            <div className="flex items-center justify-between bg-muted/20 p-3 rounded-lg border border-border/50">
+              <div className="flex items-center gap-2">
+                <CalendarIcon className="w-5 h-5 text-primary" />
+                <h3 className="text-lg font-bold text-foreground">
+                  {format(currentMonth, 'MMMM yyyy')}
+                </h3>
+              </div>
+              <div className="flex items-center gap-2">
                 <Button
                   variant="outline"
                   size="sm"
@@ -530,6 +804,7 @@ export default function AttendancePage() {
                     const newMonth = new Date(currentMonth);
                     newMonth.setMonth(newMonth.getMonth() - 1);
                     setCurrentMonth(newMonth);
+                    setSelectedDialogDate(undefined);
                     if (selectedEmployee) fetchMonthlyAttendance(selectedEmployee._id, newMonth);
                   }}
                 >
@@ -539,9 +814,22 @@ export default function AttendancePage() {
                   variant="outline"
                   size="sm"
                   onClick={() => {
+                    const today = new Date();
+                    setCurrentMonth(today);
+                    setSelectedDialogDate(undefined);
+                    if (selectedEmployee) fetchMonthlyAttendance(selectedEmployee._id, today);
+                  }}
+                >
+                  Current
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
                     const newMonth = new Date(currentMonth);
                     newMonth.setMonth(newMonth.getMonth() + 1);
                     setCurrentMonth(newMonth);
+                    setSelectedDialogDate(undefined);
                     if (selectedEmployee) fetchMonthlyAttendance(selectedEmployee._id, newMonth);
                   }}
                 >
@@ -550,107 +838,265 @@ export default function AttendancePage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Left Side: Calendar */}
-              <div className="glass-card p-4 flex justify-center items-center bg-background/50">
-                {loadingMonthly ? (
-                  <div className="flex justify-center items-center h-40">
-                    <Loader2 className="w-6 h-6 animate-spin text-primary" />
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+              {/* Left Side: Calendar & Quick Action (7 columns) */}
+              <div className="lg:col-span-7 space-y-4">
+                <div className="glass-card p-5 flex flex-col items-center justify-center bg-background/50 border border-border/50 rounded-xl">
+                  {loadingMonthly ? (
+                    <div className="flex justify-center items-center h-64">
+                      <Loader2 className="w-6 h-6 animate-spin text-primary" />
+                    </div>
+                  ) : (
+                    <Calendar
+                      mode="single"
+                      selected={selectedDialogDate}
+                      onSelect={setSelectedDialogDate}
+                      month={currentMonth}
+                      onMonthChange={(m) => {
+                        setCurrentMonth(m);
+                        setSelectedDialogDate(undefined);
+                        if (selectedEmployee) fetchMonthlyAttendance(selectedEmployee._id, m);
+                      }}
+                      showOutsideDays={false}
+                      modifiers={{
+                        present: currentMonthRecords.filter((r) => r.status === 'full-day').map((r) => new Date(r.date)),
+                        halfDay: currentMonthRecords.filter((r) => r.status === 'half-day').map((r) => new Date(r.date)),
+                        wfh: currentMonthRecords.filter((r) => r.status === 'wfh').map((r) => new Date(r.date)),
+                        absent: currentMonthRecords.filter((r) => r.status === 'absent').map((r) => new Date(r.date)),
+                        leave: currentMonthRecords.filter((r) => r.status === 'leave').map((r) => new Date(r.date)),
+                        holiday: currentMonthRecords.filter((r) => r.status === 'holiday').map((r) => new Date(r.date)),
+                        sunday: (d: Date) =>
+                          d.getDay() === 0 &&
+                          d.getFullYear() === currentMonth.getFullYear() &&
+                          d.getMonth() === currentMonth.getMonth() &&
+                          !markedDateStrings.has(format(d, 'yyyy-MM-dd')),
+                      }}
+                      modifiersStyles={{
+                        present: { backgroundColor: '#10b981', color: 'white', borderRadius: '50%' },
+                        halfDay: { backgroundColor: '#f59e0b', color: 'white', borderRadius: '50%' },
+                        wfh: { backgroundColor: '#a855f7', color: 'white', borderRadius: '50%' },
+                        absent: { backgroundColor: '#ef4444', color: 'white', borderRadius: '50%' },
+                        leave: { backgroundColor: '#3b82f6', color: 'white', borderRadius: '50%' },
+                        holiday: { backgroundColor: '#06b6d4', color: 'white', borderRadius: '50%' },
+                        sunday: { backgroundColor: '#f43f5e', color: 'white', borderRadius: '50%' },
+                      }}
+                      className="border-0 p-3"
+                    />
+                  )}
+                </div>
+
+                {/* Quick Date Actions Panel */}
+                <div className="glass-card p-4 bg-muted/20 border border-border/50 rounded-xl space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-foreground">
+                      {selectedDialogDate
+                        ? `Selected: ${format(selectedDialogDate, 'EEE, dd MMM yyyy')}`
+                        : 'Click any date above to edit or remove attendance'}
+                    </span>
+                    {selectedDialogDate && (
+                      <div>
+                        {selectedDialogRecord ? (
+                          getStatusBadge(selectedDialogRecord.status)
+                        ) : isSelectedDialogSunday ? (
+                          <Badge className="bg-rose-500 text-white hover:bg-rose-600">Sunday (Auto)</Badge>
+                        ) : (
+                          <Badge variant="outline" className="text-muted-foreground">Unmarked</Badge>
+                        )}
+                      </div>
+                    )}
                   </div>
-                ) : (
-                  <Calendar
-                    month={currentMonth}
-                    onMonthChange={setCurrentMonth}
-                    modifiers={{
-                      present: monthlyAttendance.filter(r => r.status === 'full-day').map(r => new Date(r.date)),
-                      halfDay: monthlyAttendance.filter(r => r.status === 'half-day').map(r => new Date(r.date)),
-                      wfh: monthlyAttendance.filter(r => r.status === 'wfh').map(r => new Date(r.date)),
-                      absent: monthlyAttendance.filter(r => r.status === 'absent').map(r => new Date(r.date)),
-                      leave: monthlyAttendance.filter(r => r.status === 'leave').map(r => new Date(r.date)),
-                    }}
-                    modifiersStyles={{
-                      present: { backgroundColor: '#10b981', color: 'white', borderRadius: '50%' },
-                      halfDay: { backgroundColor: '#f59e0b', color: 'white', borderRadius: '50%' },
-                      wfh: { backgroundColor: '#a855f7', color: 'white', borderRadius: '50%' },
-                      absent: { backgroundColor: '#ef4444', color: 'white', borderRadius: '50%' },
-                      leave: { backgroundColor: '#3b82f6', color: 'white', borderRadius: '50%' },
-                    }}
-                    className="border-0"
-                  />
-                )}
+
+                  {selectedDialogDate && (
+                    <div className="pt-3 border-t border-border/40 space-y-2">
+                      <div className="text-xs text-muted-foreground">Select an option to update or remove:</div>
+                      <div className="flex flex-wrap gap-2 items-center">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={actionLoading}
+                          className={cn(
+                            "h-8 px-3 text-xs font-medium transition-all",
+                            selectedDialogRecord?.status === 'full-day'
+                              ? "bg-emerald-500 text-white border-emerald-500 font-semibold shadow-sm"
+                              : "bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500 hover:text-white"
+                          )}
+                          onClick={() => handleDialogUpdateStatus('full-day')}
+                        >
+                          Full Day
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={actionLoading}
+                          className={cn(
+                            "h-8 px-3 text-xs font-medium transition-all",
+                            selectedDialogRecord?.status === 'half-day'
+                              ? "bg-amber-500 text-white border-amber-500 font-semibold shadow-sm"
+                              : "bg-amber-500/10 text-amber-400 border-amber-500/30 hover:bg-amber-500 hover:text-white"
+                          )}
+                          onClick={() => handleDialogUpdateStatus('half-day')}
+                        >
+                          Half Day
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={actionLoading}
+                          className={cn(
+                            "h-8 px-3 text-xs font-medium transition-all",
+                            selectedDialogRecord?.status === 'wfh'
+                              ? "bg-purple-500 text-white border-purple-500 font-semibold shadow-sm"
+                              : "bg-purple-500/10 text-purple-400 border-purple-500/30 hover:bg-purple-500 hover:text-white"
+                          )}
+                          onClick={() => handleDialogUpdateStatus('wfh')}
+                        >
+                          WFH
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={actionLoading}
+                          className={cn(
+                            "h-8 px-3 text-xs font-medium transition-all",
+                            selectedDialogRecord?.status === 'leave'
+                              ? "bg-blue-500 text-white border-blue-500 font-semibold shadow-sm"
+                              : "bg-blue-500/10 text-blue-400 border-blue-500/30 hover:bg-blue-500 hover:text-white"
+                          )}
+                          onClick={() => handleDialogUpdateStatus('leave')}
+                        >
+                          Leave
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={actionLoading}
+                          className={cn(
+                            "h-8 px-3 text-xs font-medium transition-all",
+                            selectedDialogRecord?.status === 'absent'
+                              ? "bg-red-500 text-white border-red-500 font-semibold shadow-sm"
+                              : "bg-red-500/10 text-red-400 border-red-500/30 hover:bg-red-500 hover:text-white"
+                          )}
+                          onClick={() => handleDialogUpdateStatus('absent')}
+                        >
+                          Absent
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={actionLoading}
+                          className={cn(
+                            "h-8 px-3 text-xs font-medium transition-all",
+                            selectedDialogRecord?.status === 'holiday'
+                              ? "bg-cyan-500 text-white border-cyan-500 font-semibold shadow-sm"
+                              : "bg-cyan-500/10 text-cyan-400 border-cyan-500/30 hover:bg-cyan-500 hover:text-white"
+                          )}
+                          onClick={() => handleDialogUpdateStatus('holiday')}
+                        >
+                          Holiday
+                        </Button>
+
+                        {/* Remove attendance option */}
+                        {selectedDialogRecord && (
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            disabled={actionLoading}
+                            className="h-8 px-3 text-xs ml-auto font-medium shadow-sm hover:bg-destructive/90"
+                            onClick={() => handleDialogUpdateStatus(null)}
+                          >
+                            {actionLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" /> : <Trash2 className="w-3.5 h-3.5 mr-1.5" />}
+                            Remove Attendance
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
 
-              {/* Right Side: Stats & Info */}
-              <div className="space-y-6">
-                {/* Stats Cards */}
+              {/* Right Side: Isolated Monthly Stats & Legend (5 columns) */}
+              <div className="lg:col-span-5 space-y-6">
+                {/* Stats Cards (Isolated to currentMonth ONLY) */}
                 {loadingMonthly ? (
                   <div className="flex justify-center items-center h-20">
                     <Loader2 className="w-6 h-6 animate-spin text-primary" />
                   </div>
                 ) : (
                   <div className="grid grid-cols-2 gap-3">
-                    {(() => {
-                      const counts = calculateCounts();
-                      return (
-                        <>
-                          <Card className="p-3 bg-background/50 border-emerald-500/20">
-                            <div className="text-xs text-muted-foreground">Present</div>
-                            <div className="text-xl font-bold text-emerald-500">{counts.present}</div>
-                            <div className="text-[10px] text-muted-foreground">{counts.halfDay} half days</div>
-                          </Card>
-                          <Card className="p-3 bg-background/50 border-purple-500/20">
-                            <div className="text-xs text-muted-foreground">WFH</div>
-                            <div className="text-xl font-bold text-purple-500">{counts.wfh}</div>
-                            <div className="text-[10px] text-muted-foreground">Work From Home</div>
-                          </Card>
-                          <Card className="p-3 bg-background/50 border-red-500/20">
-                            <div className="text-xs text-muted-foreground">Absent</div>
-                            <div className="text-xl font-bold text-red-500">{counts.absent}</div>
-                          </Card>
-                          <Card className="p-3 bg-background/50 border-blue-500/20">
-                            <div className="text-xs text-muted-foreground">Leave</div>
-                            <div className="text-xl font-bold text-blue-500">{counts.leave}</div>
-                          </Card>
-                          <Card className="p-3 bg-background/50 border-sidebar-border col-span-2">
-                            <div className="text-xs text-muted-foreground">Total Marked</div>
-                            <div className="text-xl font-bold text-foreground">{counts.total}</div>
-                          </Card>
-                        </>
-                      );
-                    })()}
+                    <Card className="p-3.5 bg-background/50 border-emerald-500/20">
+                      <div className="text-xs text-muted-foreground">Present</div>
+                      <div className="text-2xl font-bold text-emerald-500">{calculateCounts.present}</div>
+                      <div className="text-[11px] text-muted-foreground">{calculateCounts.halfDay} half days</div>
+                    </Card>
+                    <Card className="p-3.5 bg-background/50 border-purple-500/20">
+                      <div className="text-xs text-muted-foreground">WFH</div>
+                      <div className="text-2xl font-bold text-purple-500">{calculateCounts.wfh}</div>
+                      <div className="text-[11px] text-muted-foreground">Work From Home</div>
+                    </Card>
+                    <Card className="p-3.5 bg-background/50 border-red-500/20">
+                      <div className="text-xs text-muted-foreground">Absent</div>
+                      <div className="text-2xl font-bold text-red-500">{calculateCounts.absent}</div>
+                      <div className="text-[11px] text-muted-foreground">Full Day Absent</div>
+                    </Card>
+                    <Card className="p-3.5 bg-background/50 border-blue-500/20">
+                      <div className="text-xs text-muted-foreground">Leave</div>
+                      <div className="text-2xl font-bold text-blue-500">{calculateCounts.leave}</div>
+                      <div className="text-[11px] text-muted-foreground">Approved Leaves</div>
+                    </Card>
+                    <Card className="p-3.5 bg-background/50 border-cyan-500/20">
+                      <div className="text-xs text-muted-foreground">Holiday</div>
+                      <div className="text-2xl font-bold text-cyan-500">{calculateCounts.holiday}</div>
+                      <div className="text-[11px] text-muted-foreground">Public / Fest. Holidays</div>
+                    </Card>
+                    <Card className="p-3.5 bg-background/50 border-sidebar-border">
+                      <div className="text-xs text-muted-foreground">Total Marked</div>
+                      <div className="text-2xl font-bold text-foreground">{calculateCounts.total}</div>
+                      <div className="text-[11px] text-muted-foreground">Days Recorded in Month</div>
+                    </Card>
                   </div>
                 )}
 
                 {/* Legend */}
                 <div className="space-y-2">
                   <h4 className="text-sm font-semibold text-foreground">Legend</h4>
-                  <div className="grid grid-cols-3 gap-2 text-xs">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 text-xs bg-muted/20 p-3.5 rounded-xl border border-border/50">
                     <div className="flex items-center gap-2">
-                      <span className="w-3 h-3 bg-emerald-500 rounded-full"></span>
+                      <span className="w-3 h-3 bg-emerald-500 rounded-full shrink-0"></span>
                       <span>Full Day</span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className="w-3 h-3 bg-amber-500 rounded-full"></span>
+                      <span className="w-3 h-3 bg-amber-500 rounded-full shrink-0"></span>
                       <span>Half Day</span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className="w-3 h-3 bg-purple-500 rounded-full"></span>
+                      <span className="w-3 h-3 bg-purple-500 rounded-full shrink-0"></span>
                       <span>WFH</span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className="w-3 h-3 bg-red-500 rounded-full"></span>
+                      <span className="w-3 h-3 bg-red-500 rounded-full shrink-0"></span>
                       <span>Absent</span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className="w-3 h-3 bg-blue-500 rounded-full"></span>
+                      <span className="w-3 h-3 bg-blue-500 rounded-full shrink-0"></span>
                       <span>Leave</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="w-3 h-3 bg-cyan-500 rounded-full shrink-0"></span>
+                      <span>Holiday</span>
+                    </div>
+                    <div className="flex items-center gap-2 col-span-2 sm:col-span-3 pt-1.5 border-t border-border/40">
+                      <span className="w-3 h-3 bg-rose-500 rounded-full shrink-0"></span>
+                      <span className="text-rose-400 font-medium">Sunday (Auto Marked / Off)</span>
                     </div>
                   </div>
                 </div>
 
-                {/* Recent Notes or Info */}
-                <div className="text-xs text-muted-foreground bg-muted/30 p-3 rounded-lg">
-                  <p>ℹ Dates are highlighted based on attendance status. This calendar is read-only.</p>
+                {/* Information Note */}
+                <div className="text-xs text-muted-foreground bg-muted/30 p-3.5 rounded-lg flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-primary shrink-0 mt-0.5" />
+                  <p>
+                    All statistics strictly reflect attendance for <strong>{format(currentMonth, 'MMMM yyyy')}</strong> only. Click any date on the calendar to change its status or remove wrongly clicked attendance.
+                  </p>
                 </div>
               </div>
             </div>

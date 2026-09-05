@@ -225,7 +225,7 @@ export interface IAttendance extends Document {
   userId: mongoose.Types.ObjectId;
   employeeId: mongoose.Types.ObjectId;
   date: Date;
-  status: 'full-day' | 'half-day' | 'absent' | 'leave' | 'wfh';
+  status: 'full-day' | 'half-day' | 'absent' | 'leave' | 'wfh' | 'holiday';
   notes?: string;
   createdAt: Date;
   updatedAt: Date;
@@ -236,7 +236,7 @@ const AttendanceSchema = new Schema<IAttendance>(
     userId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     employeeId: { type: Schema.Types.ObjectId, ref: 'Employee', required: true },
     date: { type: Date, required: true },
-    status: { type: String, enum: ['full-day', 'half-day', 'absent', 'leave', 'wfh'], required: true },
+    status: { type: String, enum: ['full-day', 'half-day', 'absent', 'leave', 'wfh', 'holiday'], required: true },
     notes: String,
   },
   { timestamps: true }
@@ -249,4 +249,7 @@ export const Quotation: Model<IQuotation> = mongoose.models.Quotation || mongoos
 export const Invoice: Model<IInvoice> = mongoose.models.Invoice || mongoose.model<IInvoice>('Invoice', InvoiceSchema);
 export const Settings: Model<ISettings> = mongoose.models.Settings || mongoose.model<ISettings>('Settings', SettingsSchema);
 export const Employee: Model<IEmployee> = mongoose.models.Employee || mongoose.model<IEmployee>('Employee', EmployeeSchema);
+if (process.env.NODE_ENV !== 'production' && mongoose.models.Attendance) {
+  delete (mongoose.models as any).Attendance;
+}
 export const Attendance: Model<IAttendance> = mongoose.models.Attendance || mongoose.model<IAttendance>('Attendance', AttendanceSchema);
