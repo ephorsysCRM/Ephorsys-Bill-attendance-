@@ -24,24 +24,29 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
     }
 
+    const isInline = req.nextUrl.searchParams.get('action') === 'print' || req.nextUrl.searchParams.get('view') === 'inline';
+
     const pdfBuffer = await generateInvoicePDF({
       invoiceNumber: invoice.invoiceNumber,
-      date: invoice.date.toISOString(),
-      dueDate: invoice.dueDate?.toISOString(),
-      clientName: (invoice.clientId as any)?.name || 'Unknown',
+      date: invoice.date ? invoice.date.toISOString() : new Date().toISOString(),
+      dueDate: invoice.dueDate ? invoice.dueDate.toISOString() : undefined,
+      clientName: (invoice.clientId as any)?.name || 'Valued Client',
       clientEmail: (invoice.clientId as any)?.email,
       clientAddress: (invoice.clientId as any)?.address,
       clientGSTIN: (invoice.clientId as any)?.taxNumber,
       GSTIN: (invoice.clientId as any)?.taxNumber,
-      items: invoice.items,
-      subtotal: invoice.subtotal, 
-      taxableAmount: invoice.subtotal,
-      igst: invoice.igstAmount > 0 ? ((invoice.igstAmount / invoice.subtotal) * 100) : 0,
-      cgstAmount: invoice.cgstAmount,
-      sgstAmount: invoice.sgstAmount,
-      igstAmount: invoice.igstAmount,
-      tax: invoice.tax,
-      total: invoice.total,
+      state: (invoice.clientId as any)?.city || (invoice.clientId as any)?.country,
+      items: invoice.items || [],
+      subtotal: invoice.subtotal || 0,
+      taxableAmount: invoice.subtotal || 0,
+      cgst: invoice.cgstAmount > 0 && invoice.subtotal > 0 ? (invoice.cgstAmount / invoice.subtotal) * 100 : undefined,
+      sgst: invoice.sgstAmount > 0 && invoice.subtotal > 0 ? (invoice.sgstAmount / invoice.subtotal) * 100 : undefined,
+      igst: invoice.igstAmount > 0 && invoice.subtotal > 0 ? (invoice.igstAmount / invoice.subtotal) * 100 : 0,
+      cgstAmount: invoice.cgstAmount || 0,
+      sgstAmount: invoice.sgstAmount || 0,
+      igstAmount: invoice.igstAmount || 0,
+      tax: invoice.tax || 0,
+      total: invoice.total || 0,
       paidAmount: invoice.paidAmount,
       notes: invoice.notes,
       companyName: 'Ephorsys Private Limited',
@@ -55,15 +60,20 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       companyIFSC: 'UTIB0000381',
     });
 
-    return new NextResponse(pdfBuffer as unknown as BodyInit, {
+    const disposition = isInline
+      ? `inline; filename="invoice-${invoice.invoiceNumber}.pdf"`
+      : `attachment; filename="invoice-${invoice.invoiceNumber}.pdf"`;
+
+    return new NextResponse(pdfBuffer, {
       status: 200,
       headers: {
         'Content-Type': 'application/pdf',
-        'Content-Disposition': `attachment; filename="invoice-${invoice.invoiceNumber}.pdf"`,
+        'Content-Disposition': disposition,
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
       },
     });
   } catch (error) {
-    console.error('Generate PDF error:', error);
+    console.error('Generate Invoice PDF error:', error);
     return NextResponse.json({ error: 'Failed to generate PDF' }, { status: 500 });
   }
 }

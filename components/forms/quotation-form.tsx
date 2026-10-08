@@ -6,7 +6,7 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import ClientModal from '@/components/forms/client-modal';
-import { Trash2, Plus } from 'lucide-react';
+import { Trash2, Plus, Printer } from 'lucide-react';
 
 interface QuotationItem {
   description: string;
@@ -376,10 +376,20 @@ export default function QuotationForm({ initialData, isEditing = false }: Quotat
       />
 
       {/* Actions */}
-      <div className="flex gap-4">
+      <div className="flex flex-wrap gap-4 items-center">
         <Button type="submit" disabled={loading}>
           {loading ? 'Saving...' : isEditing ? 'Update Quotation' : 'Create Quotation'}
         </Button>
+        {isEditing && initialData?._id && (
+          <Button
+            type="button"
+            variant="outline"
+            className="border-green-600/50 text-green-500 hover:bg-green-600/10 flex items-center gap-2"
+            onClick={() => window.open(`/quotations/${initialData._id}/print?print=true`, '_blank')}
+          >
+            <Printer className="w-4 h-4" /> Print
+          </Button>
+        )}
         <Button type="button" variant="outline" onClick={() => router.back()}>
           Cancel
         </Button>

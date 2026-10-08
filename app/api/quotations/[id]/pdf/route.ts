@@ -1,7 +1,7 @@
 import { getSession } from '@/lib/auth';
 import { connectDB } from '@/lib/mongodb';
 import { Quotation } from '@/lib/models';
-import { generateInvoicePDF } from '@/lib/pdf-generator'; // Can reuse but with quotation labeling
+import { generateQuotationPDF } from '@/lib/pdf-generator';
 import { NextRequest, NextResponse } from 'next/server';
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -24,26 +24,31 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       return NextResponse.json({ error: 'Quotation not found' }, { status: 404 });
     }
 
-    const pdfBuffer = await generateInvoicePDF({
+    const isInline = req.nextUrl.searchParams.get('action') === 'print' || req.nextUrl.searchParams.get('view') === 'inline';
+
+    const pdfBuffer = await generateQuotationPDF({
       invoiceNumber: quotation.quotationNumber,
-      date: quotation.date.toISOString(),
-      dueDate: quotation.dueDate?.toISOString(),
-      clientName: (quotation.clientId as any)?.name || 'Unknown',
+      date: quotation.date ? quotation.date.toISOString() : new Date().toISOString(),
+      dueDate: quotation.dueDate ? quotation.dueDate.toISOString() : undefined,
+      validUntil: quotation.dueDate ? quotation.dueDate.toISOString() : undefined,
+      status: quotation.status,
+      clientName: (quotation.clientId as any)?.name || 'Valued Client',
       clientEmail: (quotation.clientId as any)?.email,
       clientAddress: (quotation.clientId as any)?.address,
       clientGSTIN: (quotation.clientId as any)?.taxNumber,
       GSTIN: (quotation.clientId as any)?.taxNumber,
-      items: quotation.items,
-      subtotal: quotation.subtotal,
-      taxableAmount: quotation.subtotal,
-      cgst: 0,
-      sgst: 0,
-      igst: quotation.igstAmount > 0 ? 18 : 0, // Assuming 18% IGST
-      cgstAmount: quotation.cgstAmount,
-      sgstAmount: quotation.sgstAmount,
-      igstAmount: quotation.igstAmount,
-      tax: quotation.tax,
-      total: quotation.total,
+      state: (quotation.clientId as any)?.city || (quotation.clientId as any)?.country,
+      items: quotation.items || [],
+      subtotal: quotation.subtotal || 0,
+      taxableAmount: quotation.subtotal || 0,
+      cgst: quotation.cgstAmount > 0 && quotation.subtotal > 0 ? (quotation.cgstAmount / quotation.subtotal) * 100 : undefined,
+      sgst: quotation.sgstAmount > 0 && quotation.subtotal > 0 ? (quotation.sgstAmount / quotation.subtotal) * 100 : undefined,
+      igst: quotation.igstAmount > 0 && quotation.subtotal > 0 ? (quotation.igstAmount / quotation.subtotal) * 100 : 0,
+      cgstAmount: quotation.cgstAmount || 0,
+      sgstAmount: quotation.sgstAmount || 0,
+      igstAmount: quotation.igstAmount || 0,
+      tax: quotation.tax || 0,
+      total: quotation.total || 0,
       notes: quotation.notes,
       companyName: 'Ephorsys Private Limited',
       companyEmail: 'business@ephorsys.com',
@@ -56,15 +61,20 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       companyIFSC: 'UTIB0000381',
     });
 
-    return new NextResponse(pdfBuffer as unknown as BodyInit, {
+    const disposition = isInline
+      ? `inline; filename="quotation-${quotation.quotationNumber}.pdf"`
+      : `attachment; filename="quotation-${quotation.quotationNumber}.pdf"`;
+
+    return new NextResponse(pdfBuffer, {
       status: 200,
       headers: {
         'Content-Type': 'application/pdf',
-        'Content-Disposition': `attachment; filename="quotation-${quotation.quotationNumber}.pdf"`,
+        'Content-Disposition': disposition,
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
       },
     });
   } catch (error) {
-    console.error('Generate PDF error:', error);
+    console.error('Generate Quotation PDF error:', error);
     return NextResponse.json({ error: 'Failed to generate PDF' }, { status: 500 });
   }
 }
