@@ -253,3 +253,44 @@ if (process.env.NODE_ENV !== 'production' && mongoose.models.Attendance) {
   delete (mongoose.models as any).Attendance;
 }
 export const Attendance: Model<IAttendance> = mongoose.models.Attendance || mongoose.model<IAttendance>('Attendance', AttendanceSchema);
+
+// Password Reset Interface and Schema
+export interface IPasswordReset extends Document {
+  email: string;
+  otpHash?: string;
+  salt?: string;
+  attempts: number;
+  maxAttempts: number;
+  expiresAt: Date;
+  lastRequestedAt: Date;
+  resetTokenHash?: string;
+  resetTokenExpiresAt?: Date;
+  isVerified: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+const PasswordResetSchema = new Schema<IPasswordReset>(
+  {
+    email: { type: String, required: true, lowercase: true, index: true },
+    otpHash: { type: String },
+    salt: { type: String },
+    attempts: { type: Number, default: 0 },
+    maxAttempts: { type: Number, default: 5 },
+    expiresAt: { type: Date, required: true, index: { expires: 0 } },
+    lastRequestedAt: { type: Date, default: Date.now },
+    resetTokenHash: String,
+    resetTokenExpiresAt: Date,
+    isVerified: { type: Boolean, default: false },
+  },
+  { timestamps: true }
+);
+
+if (process.env.NODE_ENV !== 'production' && mongoose.models.PasswordReset) {
+  delete (mongoose.models as any).PasswordReset;
+}
+
+export const PasswordReset: Model<IPasswordReset> =
+  mongoose.models.PasswordReset || mongoose.model<IPasswordReset>('PasswordReset', PasswordResetSchema);
+
+
