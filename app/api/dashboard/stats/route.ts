@@ -11,6 +11,10 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    if (session.role === 'hr') {
+      return NextResponse.json({ error: 'Forbidden: HR accounts do not have access to financial statistics.' }, { status: 403 });
+    }
+
     await connectDB();
 
     const [invoices, quotations, clients] = await Promise.all([

@@ -56,9 +56,10 @@ interface SidebarProps {
   onClose?: () => void;
   isCollapsed?: boolean;
   onToggleCollapse?: () => void;
+  userRole?: 'admin' | 'hr';
 }
 
-export default function Sidebar({ onClose, isCollapsed = false, onToggleCollapse }: SidebarProps) {
+export default function Sidebar({ onClose, isCollapsed = false, onToggleCollapse, userRole = 'admin' }: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
 
@@ -69,6 +70,10 @@ export default function Sidebar({ onClose, isCollapsed = false, onToggleCollapse
     });
     router.push('/login');
   };
+
+  const displayedNavItems = userRole === 'hr'
+    ? navItems.filter((item) => item.href === '/dashboard/attendance')
+    : navItems;
 
   return (
     <div className={cn(
@@ -131,13 +136,15 @@ export default function Sidebar({ onClose, isCollapsed = false, onToggleCollapse
         )}
 
         {!isCollapsed && (
-          <p className="text-xs text-sidebar-foreground/60 mt-1 whitespace-nowrap">Billing Software</p>
+          <p className="text-xs text-sidebar-foreground/60 mt-1 whitespace-nowrap">
+            {userRole === 'hr' ? 'HR Attendance Portal' : 'Billing Software'}
+          </p>
         )}
       </div>
 
       {/* Navigation Links */}
       <nav className="flex-1 p-3 space-y-1.5 overflow-y-auto overflow-x-hidden">
-        {navItems.map((item) => {
+        {displayedNavItems.map((item) => {
           const Icon = item.icon;
           const isActive = item.end
             ? pathname === item.href

@@ -12,7 +12,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Calendar } from '@/components/ui/calendar';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { format, isSameMonth, isSameYear } from 'date-fns';
-import { Plus, Calendar as CalendarIcon, Check, X, Clock, User, Save, Loader2, Edit, Trash2, Eye, Sun, AlertCircle } from 'lucide-react';
+import { Plus, Calendar as CalendarIcon, Check, X, Clock, User, Save, Loader2, Edit, Trash2, Eye, Sun, AlertCircle, Shield, ShieldAlert, ShieldCheck, KeyRound, Lock, UserCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 
@@ -22,6 +22,9 @@ interface Employee {
   empId: string;
   designation: string;
   empType: string;
+  email?: string;
+  role?: 'admin' | 'hr' | 'employee';
+  status?: 'active' | 'terminated';
 }
 
 export type AttendanceStatus = 'full-day' | 'half-day' | 'absent' | 'leave' | 'wfh' | 'holiday';
@@ -34,6 +37,7 @@ interface AttendanceRecord {
 
 export default function AttendancePage() {
   const [date, setDate] = useState<Date>(new Date());
+  const [currentUserRole, setCurrentUserRole] = useState<'admin' | 'hr'>('admin');
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [attendance, setAttendance] = useState<Record<string, AttendanceRecord>>({});
   const [loading, setLoading] = useState(true);
@@ -43,6 +47,10 @@ export default function AttendancePage() {
     empId: '',
     designation: '',
     empType: 'Full-time',
+    email: '',
+    password: '',
+    role: 'employee' as 'employee' | 'hr',
+    status: 'active' as 'active' | 'terminated',
   });
   
   // State for monthly summary
@@ -58,6 +66,18 @@ export default function AttendancePage() {
   const [actionLoading, setActionLoading] = useState(false);
 
   useEffect(() => {
+    const fetchUserRole = async () => {
+      try {
+        const res = await fetch('/api/auth/me');
+        if (res.ok) {
+          const data = await res.json();
+          if (data.user?.role) {
+            setCurrentUserRole(data.user.role);
+          }
+        }
+      } catch {}
+    };
+    fetchUserRole();
     fetchEmployees();
   }, []);
 
@@ -228,27 +248,59 @@ export default function AttendancePage() {
     }
   };
 
+  const resetEmployeeForm = () => {
+    setEditingEmployee(null);
+    setNewEmployee({
+      name: '',
+      empId: '',
+      designation: '',
+      empType: 'Full-time',
+      email: '',
+      password: '',
+      role: 'employee',
+      status: 'active',
+    });
+  };
+
   const handleAddEmployee = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
       const method = editingEmployee ? 'PUT' : 'POST';
-      const body = editingEmployee 
-        ? { ...newEmployee, _id: editingEmployee._id }
-        : newEmployee;
+      const bodyPayload: any = {
+        name: newEmployee.name,
+        empId: newEmployee.empId,
+        designation: newEmployee.designation,
+        empType: newEmployee.empType,
+        role: newEmployee.role,
+        status: newEmployee.status,
+      };
+
+      if (newEmployee.email && newEmployee.email.trim()) {
+        bodyPayload.email = newEmployee.email.trim();
+      }
+
+      if (newEmployee.password && newEmployee.password.trim()) {
+        bodyPayload.password = newEmployee.password.trim();
+      }
+
+      if (editingEmployee) {
+        bodyPayload._id = editingEmployee._id;
+      }
 
       const res = await fetch('/api/employees', {
         method,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify(bodyPayload),
       });
 
+      const data = await res.json();
+
       if (res.ok) {
-        toast.success(editingEmployee ? 'Employee updated successfully' : 'Employee added successfully');
-        setNewEmployee({ name: '', empId: '', designation: '', empType: 'Full-time' });
-        setEditingEmployee(null);
+        toast.success(editingEmployee ? 'Employee updated successfully' : 'Employee created successfully');
+        resetEmployeeForm();
         fetchEmployees();
       } else {
-        toast.error(editingEmployee ? 'Failed to update employee' : 'Failed to add employee');
+        toast.error(data.error || 'Failed to save employee');
       }
     } catch (error) {
       console.error('Save employee error:', error);
@@ -263,7 +315,70 @@ export default function AttendancePage() {
       empId: emp.empId,
       designation: emp.designation,
       empType: emp.empType,
+      email: emp.email || '',
+      password: '', // blank to leave password unchanged
+      role: (emp.role === 'hr' ? 'hr' : 'employee'),
+      status: (emp.status === 'terminated' ? 'terminated' : 'active'),
     });
+  };
+
+  const handleToggleEmployeeStatus = async (emp: Employee) => {
+    const isCurrentlyTerminated = emp.status === 'terminated';
+    const newStatus = isCurrentlyTerminated ? 'active' : 'terminated';
+    const actionText = isCurrentlyTerminated ? 'Reactivate' : 'Terminate';
+
+    if (!isCurrentlyTerminated && !confirm(`Are you sure you want to terminate access for ${emp.name}? Their login credentials will be immediately revoked.`)) {
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/employees', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          _id: emp._id,
+          status: newStatus,
+          terminateCredentials: !isCurrentlyTerminated,
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        toast.success(`${emp.name}'s account has been ${newStatus}.`);
+        if (editingEmployee?._id === emp._id) {
+          resetEmployeeForm();
+        }
+        fetchEmployees();
+      } else {
+        toast.error(data.error || `Failed to ${actionText.toLowerCase()} access`);
+      }
+    } catch {
+      toast.error(`Failed to ${actionText.toLowerCase()} access`);
+    }
+  };
+
+  const handleDeleteEmployee = async (empId: string, empName: string) => {
+    if (!confirm(`Are you sure you want to permanently delete employee ${empName}? This will also delete all their attendance records.`)) {
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/employees?id=${empId}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      if (res.ok) {
+        toast.success(`Employee ${empName} deleted successfully`);
+        if (editingEmployee?._id === empId) {
+          resetEmployeeForm();
+        }
+        fetchEmployees();
+      } else {
+        toast.error(data.error || 'Failed to delete employee');
+      }
+    } catch {
+      toast.error('Failed to delete employee');
+    }
   };
 
   const handleViewEmployeeSummary = async (emp: Employee) => {
@@ -453,7 +568,11 @@ export default function AttendancePage() {
       <Tabs defaultValue="attendance" className="space-y-6">
         <TabsList className="bg-background/50 backdrop-blur-sm border p-1 rounded-lg">
           <TabsTrigger value="attendance" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">Daily Attendance</TabsTrigger>
-          <TabsTrigger value="employees" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">Manage Employees</TabsTrigger>
+          {currentUserRole === 'admin' && (
+            <TabsTrigger value="employees" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
+              Manage Employees & HR Credentials
+            </TabsTrigger>
+          )}
         </TabsList>
 
         {/* Attendance Tab */}
@@ -637,141 +756,320 @@ export default function AttendancePage() {
           </Card>
         </TabsContent>
 
-        {/* Employees Tab */}
-        <TabsContent value="employees" className="space-y-6">
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Add Employee Form */}
-            <Card className="glass-card p-6 lg:col-span-1 h-fit">
-              <h2 className="text-lg font-semibold text-foreground mb-4 flex items-center gap-2">
-                <User className="w-5 h-5 text-primary" />
-                {editingEmployee ? 'Edit Employee' : 'Add New Employee'}
-              </h2>
-              <form onSubmit={handleAddEmployee} className="space-y-4">
-                <div className="space-y-2">
-                  <label className="text-sm text-muted-foreground">Name</label>
-                  <Input
-                    placeholder="John Doe"
-                    value={newEmployee.name}
-                    onChange={(e) => setNewEmployee({ ...newEmployee, name: e.target.value })}
-                    required
-                    className="bg-background/50"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm text-muted-foreground">Employee ID</label>
-                  <Input
-                    placeholder="EMP001"
-                    value={newEmployee.empId}
-                    onChange={(e) => setNewEmployee({ ...newEmployee, empId: e.target.value })}
-                    required
-                    className="bg-background/50"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm text-muted-foreground">Designation</label>
-                  <Input
-                    placeholder="Software Engineer"
-                    value={newEmployee.designation}
-                    onChange={(e) => setNewEmployee({ ...newEmployee, designation: e.target.value })}
-                    required
-                    className="bg-background/50"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm text-muted-foreground">Employee Type</label>
-                  <Select
-                    value={newEmployee.empType}
-                    onValueChange={(value) => setNewEmployee({ ...newEmployee, empType: value })}
-                  >
-                    <SelectTrigger className="bg-background/50">
-                      <SelectValue placeholder="Select type" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Full-time">Full-time</SelectItem>
-                      <SelectItem value="Part-time">Part-time</SelectItem>
-                      <SelectItem value="Contract">Contract</SelectItem>
-                      <SelectItem value="Intern">Intern</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="flex gap-2">
-                  {editingEmployee && (
-                    <Button 
-                      type="button" 
-                      variant="outline" 
-                      className="flex-1"
-                      onClick={() => {
-                        setEditingEmployee(null);
-                        setNewEmployee({ name: '', empId: '', designation: '', empType: 'Full-time' });
-                      }}
-                    >
-                      Cancel
-                    </Button>
-                  )}
-                  <Button type="submit" className="flex-1 bg-primary hover:bg-primary/90 text-primary-foreground">
-                    {editingEmployee ? <Save className="w-4 h-4 mr-2" /> : <Plus className="w-4 h-4 mr-2" />}
-                    {editingEmployee ? 'Update' : 'Add Employee'}
-                  </Button>
-                </div>
-              </form>
-            </Card>
+        {/* Employees Tab (Admin Only) */}
+        {currentUserRole === 'admin' && (
+          <TabsContent value="employees" className="space-y-6">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              {/* Add / Edit Employee Form */}
+              <Card className="glass-card p-6 lg:col-span-1 h-fit">
+                <h2 className="text-lg font-semibold text-foreground mb-1 flex items-center gap-2">
+                  <User className="w-5 h-5 text-primary" />
+                  {editingEmployee ? 'Edit Employee & Credentials' : 'Add Employee / HR'}
+                </h2>
+                <p className="text-xs text-muted-foreground mb-4">
+                  Provision HR accounts with email & password or add regular staff.
+                </p>
 
-            {/* Employee List */}
-            <Card className="glass-card p-6 lg:col-span-2">
-              <h2 className="text-lg font-semibold text-foreground mb-4">Employee Directory</h2>
-              {loading ? (
-                <div className="flex justify-center items-center h-40">
-                  <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                <form onSubmit={handleAddEmployee} className="space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-sm text-muted-foreground">Full Name *</label>
+                    <Input
+                      placeholder="Jane Doe"
+                      value={newEmployee.name}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, name: e.target.value })}
+                      required
+                      className="bg-background/50"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-sm text-muted-foreground">Employee ID *</label>
+                    <Input
+                      placeholder="EMP001"
+                      value={newEmployee.empId}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, empId: e.target.value })}
+                      required
+                      className="bg-background/50"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-sm text-muted-foreground">Designation *</label>
+                    <Input
+                      placeholder="Human Resources Manager"
+                      value={newEmployee.designation}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, designation: e.target.value })}
+                      required
+                      className="bg-background/50"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-2">
+                      <label className="text-sm text-muted-foreground">Employment</label>
+                      <Select
+                        value={newEmployee.empType}
+                        onValueChange={(value) => setNewEmployee({ ...newEmployee, empType: value })}
+                      >
+                        <SelectTrigger className="bg-background/50">
+                          <SelectValue placeholder="Select type" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Full-time">Full-time</SelectItem>
+                          <SelectItem value="Part-time">Part-time</SelectItem>
+                          <SelectItem value="Contract">Contract</SelectItem>
+                          <SelectItem value="Intern">Intern</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-sm text-muted-foreground">Account Role</label>
+                      <Select
+                        value={newEmployee.role}
+                        onValueChange={(value: 'employee' | 'hr') => setNewEmployee({ ...newEmployee, role: value })}
+                      >
+                        <SelectTrigger className="bg-background/50">
+                          <SelectValue placeholder="Select role" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="employee">Staff (No Login)</SelectItem>
+                          <SelectItem value="hr">HR (Portal Login)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  {/* Credentials Section */}
+                  <div className="p-4 rounded-xl bg-slate-900/40 border border-slate-700/50 space-y-3">
+                    <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-emerald-400">
+                      <KeyRound className="w-3.5 h-3.5" />
+                      <span>Login Credentials {newEmployee.role === 'hr' ? '(Required for HR)' : '(Optional)'}</span>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-xs text-muted-foreground">Email Address</label>
+                      <Input
+                        type="email"
+                        placeholder="hr@ephorsys.com"
+                        value={newEmployee.email}
+                        onChange={(e) => setNewEmployee({ ...newEmployee, email: e.target.value })}
+                        required={newEmployee.role === 'hr'}
+                        className="bg-background/50 h-10 text-sm"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-xs text-muted-foreground">
+                        {editingEmployee ? 'Change Password (leave empty to keep)' : 'Password'}
+                      </label>
+                      <Input
+                        type="password"
+                        placeholder={editingEmployee ? '••••••••' : 'Set strong password'}
+                        value={newEmployee.password}
+                        onChange={(e) => setNewEmployee({ ...newEmployee, password: e.target.value })}
+                        required={!editingEmployee && newEmployee.role === 'hr'}
+                        className="bg-background/50 h-10 text-sm"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-xs text-muted-foreground">Account Status</label>
+                      <Select
+                        value={newEmployee.status}
+                        onValueChange={(value: 'active' | 'terminated') => setNewEmployee({ ...newEmployee, status: value })}
+                      >
+                        <SelectTrigger className="bg-background/50 h-10 text-sm">
+                          <SelectValue placeholder="Select status" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="active">Active (Permitted)</SelectItem>
+                          <SelectItem value="terminated">Terminated (Access Revoked)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col gap-2 pt-2">
+                    <div className="flex gap-2">
+                      {editingEmployee && (
+                        <Button 
+                          type="button" 
+                          variant="outline" 
+                          className="flex-1"
+                          onClick={resetEmployeeForm}
+                        >
+                          Cancel
+                        </Button>
+                      )}
+                      <Button type="submit" className="flex-1 bg-primary hover:bg-primary/90 text-primary-foreground">
+                        {editingEmployee ? <Save className="w-4 h-4 mr-2" /> : <Plus className="w-4 h-4 mr-2" />}
+                        {editingEmployee ? 'Update' : 'Add Employee'}
+                      </Button>
+                    </div>
+
+                    {editingEmployee && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className={cn(
+                          'w-full text-xs font-semibold',
+                          editingEmployee.status === 'terminated'
+                            ? 'text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10'
+                            : 'text-red-400 border-red-500/30 hover:bg-red-500/10'
+                        )}
+                        onClick={() => handleToggleEmployeeStatus(editingEmployee)}
+                      >
+                        {editingEmployee.status === 'terminated' ? (
+                          <>
+                            <ShieldCheck className="w-4 h-4 mr-1.5" />
+                            Reactivate Access
+                          </>
+                        ) : (
+                          <>
+                            <ShieldAlert className="w-4 h-4 mr-1.5" />
+                            Terminate Account & Revoke Credentials
+                          </>
+                        )}
+                      </Button>
+                    )}
+                  </div>
+                </form>
+              </Card>
+
+              {/* Employee Directory Table */}
+              <Card className="glass-card p-6 lg:col-span-2">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h2 className="text-lg font-semibold text-foreground">Employee & HR Directory</h2>
+                    <p className="text-xs text-muted-foreground">
+                      Manage staff roles, login credentials, and account termination.
+                    </p>
+                  </div>
+                  <Badge variant="outline" className="text-xs">
+                    {employees.length} Total Staff
+                  </Badge>
                 </div>
-              ) : employees.length === 0 ? (
-                <div className="text-center py-10 text-muted-foreground">
-                  No employees found. Add your first employee using the form.
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Emp ID</TableHead>
-                        <TableHead>Name</TableHead>
-                        <TableHead>Designation</TableHead>
-                        <TableHead>Type</TableHead>
-                        <TableHead className="text-right">Actions</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {employees.map((emp) => (
-                        <TableRow key={emp._id} className="hover:bg-muted/50">
-                          <TableCell className="font-medium text-foreground">{emp.empId}</TableCell>
-                          <TableCell>{emp.name}</TableCell>
-                          <TableCell>{emp.designation}</TableCell>
-                          <TableCell>
-                            <Badge variant="secondary">{emp.empType}</Badge>
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <div className="flex justify-end gap-2">
-                              <Button 
-                                size="icon" 
-                                variant="ghost" 
-                                className="text-muted-foreground hover:text-foreground"
-                                onClick={() => handleEditClick(emp)}
-                              >
-                                <Edit className="w-4 h-4" />
-                              </Button>
-                              <Button size="icon" variant="ghost" className="text-muted-foreground hover:text-destructive">
-                                <Trash2 className="w-4 h-4" />
-                              </Button>
-                            </div>
-                          </TableCell>
+
+                {loading ? (
+                  <div className="flex justify-center items-center h-40">
+                    <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                  </div>
+                ) : employees.length === 0 ? (
+                  <div className="text-center py-10 text-muted-foreground">
+                    No employees found. Add your first employee or HR member using the form.
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Emp ID</TableHead>
+                          <TableHead>Name</TableHead>
+                          <TableHead>Role</TableHead>
+                          <TableHead>Status</TableHead>
+                          <TableHead>Credentials</TableHead>
+                          <TableHead className="text-right">Actions</TableHead>
                         </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-              )}
-            </Card>
-          </div>
-        </TabsContent>
+                      </TableHeader>
+                      <TableBody>
+                        {employees.map((emp) => {
+                          const isTerminated = emp.status === 'terminated';
+                          const isHr = emp.role === 'hr';
+
+                          return (
+                            <TableRow key={emp._id} className={cn('hover:bg-muted/50', isTerminated && 'opacity-60 bg-red-950/10')}>
+                              <TableCell className="font-mono text-xs font-semibold text-foreground">
+                                {emp.empId}
+                              </TableCell>
+                              <TableCell>
+                                <div className="font-medium text-foreground">{emp.name}</div>
+                                <div className="text-xs text-muted-foreground">{emp.designation}</div>
+                              </TableCell>
+                              <TableCell>
+                                {isHr ? (
+                                  <Badge className="bg-emerald-500/20 text-emerald-300 border-emerald-500/40 font-semibold gap-1">
+                                    <UserCheck className="w-3 h-3" />
+                                    HR
+                                  </Badge>
+                                ) : (
+                                  <Badge variant="outline" className="text-slate-400 font-normal">
+                                    Staff
+                                  </Badge>
+                                )}
+                              </TableCell>
+                              <TableCell>
+                                {isTerminated ? (
+                                  <Badge className="bg-red-500/20 text-red-300 border-red-500/40 gap-1">
+                                    <ShieldAlert className="w-3 h-3" />
+                                    Terminated
+                                  </Badge>
+                                ) : (
+                                  <Badge className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30 gap-1">
+                                    <ShieldCheck className="w-3 h-3" />
+                                    Active
+                                  </Badge>
+                                )}
+                              </TableCell>
+                              <TableCell>
+                                {emp.email ? (
+                                  <span className="text-xs font-mono text-slate-300">{emp.email}</span>
+                                ) : (
+                                  <span className="text-xs text-muted-foreground italic">No login</span>
+                                )}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <div className="flex justify-end items-center gap-1.5">
+                                  {/* Quick Terminate / Reactivate button */}
+                                  <Button
+                                    size="icon"
+                                    variant="ghost"
+                                    title={isTerminated ? 'Reactivate account' : 'Terminate account'}
+                                    className={cn(
+                                      'h-8 w-8',
+                                      isTerminated
+                                        ? 'text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10'
+                                        : 'text-amber-400 hover:text-amber-300 hover:bg-amber-500/10'
+                                    )}
+                                    onClick={() => handleToggleEmployeeStatus(emp)}
+                                  >
+                                    {isTerminated ? <ShieldCheck className="w-4 h-4" /> : <ShieldAlert className="w-4 h-4" />}
+                                  </Button>
+
+                                  {/* Edit button */}
+                                  <Button 
+                                    size="icon" 
+                                    variant="ghost" 
+                                    className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                                    onClick={() => handleEditClick(emp)}
+                                    title="Edit employee / credentials"
+                                  >
+                                    <Edit className="w-4 h-4" />
+                                  </Button>
+
+                                  {/* Delete button */}
+                                  <Button 
+                                    size="icon" 
+                                    variant="ghost" 
+                                    className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                                    onClick={() => handleDeleteEmployee(emp._id, emp.name)}
+                                    title="Delete employee"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </Card>
+            </div>
+          </TabsContent>
+        )}
       </Tabs>
 
       {/* Monthly Summary Dialog */}

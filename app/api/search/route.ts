@@ -27,6 +27,36 @@ export async function GET(req: NextRequest) {
     const safePattern = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const regex = new RegExp(safePattern, 'i');
 
+    // If user is HR, only allow searching employees
+    if (session.role === 'hr') {
+      const employees = await Employee.find({
+        userId: session.userId,
+        $or: [
+          { name: regex },
+          { empId: regex },
+          { designation: regex },
+          { empType: regex },
+        ],
+      })
+        .sort({ createdAt: -1 })
+        .limit(6)
+        .select('_id name empId designation empType')
+        .lean();
+
+      return NextResponse.json({
+        invoices: [],
+        quotations: [],
+        clients: [],
+        employees: employees.map((emp: any) => ({
+          id: emp._id.toString(),
+          name: emp.name,
+          empId: emp.empId,
+          designation: emp.designation,
+          empType: emp.empType,
+        })),
+      });
+    }
+
     // 1. First find clients matching the name to include in invoice/quotation lookup
     const matchingClients = await Client.find({
       userId: session.userId,

@@ -11,6 +11,10 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    if (session.role === 'hr') {
+      return NextResponse.json({ error: 'Forbidden: HR accounts cannot access settings.' }, { status: 403 });
+    }
+
     await connectDB();
 
     const settings = await Settings.findOne({ userId: session.userId });
@@ -39,6 +43,10 @@ export async function PUT(req: NextRequest) {
 
     if (!session) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    if (session.role === 'hr') {
+      return NextResponse.json({ error: 'Forbidden: HR accounts cannot modify settings.' }, { status: 403 });
     }
 
     await connectDB();

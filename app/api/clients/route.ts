@@ -11,6 +11,10 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    if (session.role === 'hr') {
+      return NextResponse.json({ error: 'Forbidden: HR accounts cannot access clients.' }, { status: 403 });
+    }
+
     await connectDB();
 
     const clients = await Client.find({ userId: session.userId }).lean();
@@ -28,6 +32,10 @@ export async function POST(req: NextRequest) {
 
     if (!session) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    if (session.role === 'hr') {
+      return NextResponse.json({ error: 'Forbidden: HR accounts cannot create clients.' }, { status: 403 });
     }
 
     await connectDB();

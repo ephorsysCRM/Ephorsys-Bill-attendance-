@@ -205,6 +205,10 @@ export interface IEmployee extends Document {
   empId: string;
   designation: string;
   empType: string;
+  email?: string;
+  password?: string;
+  role: 'admin' | 'hr' | 'employee';
+  status: 'active' | 'terminated';
   createdAt: Date;
   updatedAt: Date;
 }
@@ -216,9 +220,17 @@ const EmployeeSchema = new Schema<IEmployee>(
     empId: { type: String, required: true },
     designation: { type: String, required: true },
     empType: { type: String, required: true },
+    email: { type: String, lowercase: true, trim: true, sparse: true, index: true },
+    password: { type: String },
+    role: { type: String, enum: ['admin', 'hr', 'employee'], default: 'employee' },
+    status: { type: String, enum: ['active', 'terminated'], default: 'active' },
   },
   { timestamps: true }
 );
+
+if (process.env.NODE_ENV !== 'production' && mongoose.models.Employee) {
+  delete (mongoose.models as any).Employee;
+}
 
 // Attendance Interface and Schema
 export interface IAttendance extends Document {
