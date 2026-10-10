@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Trash2, Eye, Edit2, Plus, Download } from 'lucide-react';
+import { Trash2, Eye, Edit2, Plus, Printer } from 'lucide-react';
 import { IQuotation } from '@/lib/models';
 
 export default function QuotationsPage() {
@@ -108,26 +108,26 @@ export default function QuotationsPage() {
                     </td>
                     <td className="px-6 py-4 text-right">
                       <div className="flex items-center justify-end gap-2">
-                        <a 
-                          href={`/api/quotations/${quotation._id.toString()}/pdf`}
+                        <a
+                          href={`/quotations/${quotation._id.toString()}/print?print=true`}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="p-2 hover:bg-primary/20 rounded-lg transition-colors"
-                          title="Download PDF"
+                          className="p-1.5 hover:bg-green-500/20 text-muted-foreground hover:text-green-400 rounded-lg transition-colors"
+                          title="Print Quotation"
                         >
-                          <Download className="w-4 h-4 text-primary" />
+                          <Printer className="w-4 h-4" />
                         </a>
                         <Link href={`/dashboard/quotations/${quotation._id.toString()}/edit`}>
-                          <button className="p-2 hover:bg-accent/20 rounded-lg transition-colors" title="Edit">
-                            <Edit2 className="w-4 h-4 text-accent" />
+                          <button className="p-1.5 hover:bg-accent/20 text-muted-foreground hover:text-foreground rounded-lg transition-colors" title="Edit">
+                            <Edit2 className="w-4 h-4" />
                           </button>
                         </Link>
                         <button
                           onClick={() => handleDelete(quotation._id.toString())}
-                          className="p-2 hover:bg-destructive/20 rounded-lg transition-colors"
+                          className="p-1.5 hover:bg-destructive/20 text-muted-foreground hover:text-destructive rounded-lg transition-colors"
                           title="Delete"
                         >
-                          <Trash2 className="w-4 h-4 text-destructive" />
+                          <Trash2 className="w-4 h-4" />
                         </button>
                       </div>
                     </td>

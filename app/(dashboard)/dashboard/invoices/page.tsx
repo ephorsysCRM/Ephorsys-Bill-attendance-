@@ -4,7 +4,7 @@ import { useEffect, useState, useMemo } from 'react';
 import Link from 'next/link';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Trash2, Edit2, Plus, Download } from 'lucide-react';
+import { Trash2, Edit2, Plus, Printer } from 'lucide-react';
 import { IInvoice } from '@/lib/models';
 
 export default function InvoicesPage() {
@@ -170,14 +170,28 @@ export default function InvoicesPage() {
                         </span>
                       </td>
                       <td className="px-6 py-4 text-right">
-                        <div className="flex justify-end gap-2 flex-wrap">
-                          <a href={`/api/invoices/${invoice._id}/pdf`} target="_blank" className="p-1 hover:bg-secondary/20 rounded">
-                            <Download className="w-4 h-4" />
+                        <div className="flex justify-end gap-2 items-center">
+                          <a
+                            href={`/invoices/${invoice._id}/print?print=true`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="p-1.5 hover:bg-green-500/20 text-muted-foreground hover:text-green-400 rounded transition-colors"
+                            title="Print Invoice"
+                          >
+                            <Printer className="w-4 h-4" />
                           </a>
-                          <Link href={`/dashboard/invoices/${invoice._id}/edit`} className="p-1 hover:bg-secondary/20 rounded">
+                          <Link
+                            href={`/dashboard/invoices/${invoice._id}/edit`}
+                            className="p-1.5 hover:bg-secondary/20 text-muted-foreground hover:text-foreground rounded transition-colors"
+                            title="Edit Invoice"
+                          >
                             <Edit2 className="w-4 h-4" />
                           </Link>
-                          <button onClick={() => handleDelete(invoice._id.toString())} className="p-1 hover:bg-secondary/20 rounded">
+                          <button
+                            onClick={() => handleDelete(invoice._id.toString())}
+                            className="p-1.5 hover:bg-destructive/20 text-muted-foreground hover:text-destructive rounded transition-colors cursor-pointer"
+                            title="Delete Invoice"
+                          >
                             <Trash2 className="w-4 h-4" />
                           </button>
                         </div>
