@@ -1,13 +1,15 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import Sidebar from '@/components/dashboard/sidebar';
 import Header from '@/components/dashboard/header';
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
+  const pathname = usePathname();
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [userRole, setUserRole] = useState<'admin' | 'hr'>('admin');
   const [loading, setLoading] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -38,7 +40,15 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           credentials: 'include',
         });
         if (response.ok) {
+          const data = await response.json();
+          const role = data.user?.role || 'admin';
+          setUserRole(role);
           setIsAuthenticated(true);
+
+          // STRICT RBAC: HR users can ONLY access the attendance module
+          if (role === 'hr' && pathname && pathname !== '/dashboard/attendance') {
+            router.replace('/dashboard/attendance');
+          }
         } else {
           setIsAuthenticated(false);
           router.push('/login');
@@ -53,7 +63,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     };
 
     checkAuth();
-  }, [router]);
+  }, [router, pathname]);
+
+  // Additional route guard for client-side navigation
+  useEffect(() => {
+    if (userRole === 'hr' && pathname && pathname !== '/dashboard/attendance') {
+      router.replace('/dashboard/attendance');
+    }
+  }, [pathname, userRole, router]);
 
   if (loading) {
     return (
@@ -94,6 +111,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           onClose={() => setSidebarOpen(false)} 
           isCollapsed={isSidebarCollapsed}
           onToggleCollapse={toggleSidebarCollapse}
+          userRole={userRole}
         />
       </div>
 

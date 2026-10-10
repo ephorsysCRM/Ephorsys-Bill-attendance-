@@ -4,7 +4,10 @@ const SECRET = process.env.JWT_SECRET || 'ephorsys-default-secret-2024-change-in
 
 export interface JWTPayload {
   userId: string;
+  employeeId?: string;
   email: string;
+  role: 'admin' | 'hr' | 'employee';
+  name?: string;
   iat?: number;
   exp?: number;
 }

@@ -205,6 +205,10 @@ export interface IEmployee extends Document {
   empId: string;
   designation: string;
   empType: string;
+  email?: string;
+  password?: string;
+  role: 'admin' | 'hr' | 'employee';
+  status: 'active' | 'terminated';
   createdAt: Date;
   updatedAt: Date;
 }
@@ -216,9 +220,17 @@ const EmployeeSchema = new Schema<IEmployee>(
     empId: { type: String, required: true },
     designation: { type: String, required: true },
     empType: { type: String, required: true },
+    email: { type: String, lowercase: true, trim: true, sparse: true, index: true },
+    password: { type: String },
+    role: { type: String, enum: ['admin', 'hr', 'employee'], default: 'employee' },
+    status: { type: String, enum: ['active', 'terminated'], default: 'active' },
   },
   { timestamps: true }
 );
+
+if (process.env.NODE_ENV !== 'production' && mongoose.models.Employee) {
+  delete (mongoose.models as any).Employee;
+}
 
 // Attendance Interface and Schema
 export interface IAttendance extends Document {
@@ -253,3 +265,44 @@ if (process.env.NODE_ENV !== 'production' && mongoose.models.Attendance) {
   delete (mongoose.models as any).Attendance;
 }
 export const Attendance: Model<IAttendance> = mongoose.models.Attendance || mongoose.model<IAttendance>('Attendance', AttendanceSchema);
+
+// Password Reset Interface and Schema
+export interface IPasswordReset extends Document {
+  email: string;
+  otpHash?: string;
+  salt?: string;
+  attempts: number;
+  maxAttempts: number;
+  expiresAt: Date;
+  lastRequestedAt: Date;
+  resetTokenHash?: string;
+  resetTokenExpiresAt?: Date;
+  isVerified: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+const PasswordResetSchema = new Schema<IPasswordReset>(
+  {
+    email: { type: String, required: true, lowercase: true, index: true },
+    otpHash: { type: String },
+    salt: { type: String },
+    attempts: { type: Number, default: 0 },
+    maxAttempts: { type: Number, default: 5 },
+    expiresAt: { type: Date, required: true, index: { expires: 0 } },
+    lastRequestedAt: { type: Date, default: Date.now },
+    resetTokenHash: String,
+    resetTokenExpiresAt: Date,
+    isVerified: { type: Boolean, default: false },
+  },
+  { timestamps: true }
+);
+
+if (process.env.NODE_ENV !== 'production' && mongoose.models.PasswordReset) {
+  delete (mongoose.models as any).PasswordReset;
+}
+
+export const PasswordReset: Model<IPasswordReset> =
+  mongoose.models.PasswordReset || mongoose.model<IPasswordReset>('PasswordReset', PasswordResetSchema);
+
+

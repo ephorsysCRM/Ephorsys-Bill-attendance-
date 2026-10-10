@@ -11,6 +11,10 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    if (session.role === 'hr') {
+      return NextResponse.json({ error: 'Forbidden: HR accounts cannot access invoices.' }, { status: 403 });
+    }
+
     await connectDB();
 
     const invoices = await Invoice.find({ userId: session.userId })
@@ -35,6 +39,10 @@ export async function POST(req: NextRequest) {
 
     if (!session) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    if (session.role === 'hr') {
+      return NextResponse.json({ error: 'Forbidden: HR accounts cannot create invoices.' }, { status: 403 });
     }
 
     await connectDB();

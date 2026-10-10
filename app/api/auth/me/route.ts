@@ -1,5 +1,5 @@
 import { connectDB } from '@/lib/mongodb';
-import { User } from '@/lib/models';
+import { User, Employee } from '@/lib/models';
 import { verifyToken } from '@/lib/jwt';
 import { NextRequest, NextResponse } from 'next/server';
 
@@ -24,6 +24,34 @@ export async function GET(req: NextRequest) {
 
     await connectDB();
 
+    if (session.role === 'hr') {
+      const employee = await Employee.findById(session.employeeId).select('-password');
+
+      if (!employee || employee.status === 'terminated') {
+        const response = NextResponse.json(
+          { error: 'Account terminated or deactivated. Please contact your administrator.' },
+          { status: 401 }
+        );
+        response.cookies.delete('token');
+        return response;
+      }
+
+      return NextResponse.json({
+        success: true,
+        user: {
+          id: employee._id,
+          userId: employee.userId,
+          email: employee.email,
+          name: employee.name,
+          role: 'hr',
+          empId: employee.empId,
+          designation: employee.designation,
+          status: employee.status,
+        },
+      });
+    }
+
+    // Default: Admin
     const user = await User.findById(session.userId).select('-password');
 
     if (!user) {
@@ -37,6 +65,7 @@ export async function GET(req: NextRequest) {
         email: user.email,
         name: user.name,
         company: user.company,
+        role: 'admin',
       },
     });
   } catch (error) {
@@ -44,3 +73,4 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
+
