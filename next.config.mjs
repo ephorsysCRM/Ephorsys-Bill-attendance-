@@ -9,12 +9,10 @@ const nextConfig = {
     unoptimized: true,
   },
 
-  // Keep Playwright outside the Next.js server bundle.
-  serverExternalPackages: ["playwright", "playwright-core"],
+  serverExternalPackages: ["playwright"],
 
-  // Include Playwright runtime files in the production deployment.
   outputFileTracingIncludes: {
-    "/api/invoices/[id]/html": [
+    "/api/invoices/**": [
       "./node_modules/playwright/**",
       "./node_modules/playwright-core/**",
     ],
