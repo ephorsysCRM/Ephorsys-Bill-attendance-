@@ -7,9 +7,10 @@ function getDateSearchRange(dateStr: string) {
   const [y, m, d] = dateStr.slice(0, 10).split('-').map(Number);
   // Normalized UTC date for storage
   const utcMidnight = new Date(Date.UTC(y, m - 1, d, 0, 0, 0, 0));
-  // Wide search range covering local timezone offsets (-14h to +14h)
-  const rangeStart = new Date(Date.UTC(y, m - 1, d - 1, 10, 0, 0, 0));
-  const rangeEnd = new Date(Date.UTC(y, m - 1, d + 1, 14, 0, 0, 0));
+  // Tight 22h non-overlapping window centered at UTC midnight: [UTC - 11h, UTC + 11h]
+  // Completely isolates each calendar day and prevents adjacent day wiping (e.g. Oct 6 vs Oct 7)
+  const rangeStart = new Date(Date.UTC(y, m - 1, d, 0, 0, 0, 0) - 11 * 60 * 60 * 1000);
+  const rangeEnd = new Date(Date.UTC(y, m - 1, d, 0, 0, 0, 0) + 11 * 60 * 60 * 1000);
   return { utcMidnight, rangeStart, rangeEnd };
 }
 
@@ -59,10 +60,11 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    // Determine if the entire day is marked as Holiday
+    // Determine if the entire day is marked as Holiday or WFH
     const isHoliday = attendance.length > 0 && attendance.every((r: any) => r.status === 'holiday');
+    const isWfh = attendance.length > 0 && attendance.every((r: any) => r.status === 'wfh');
 
-    return NextResponse.json({ attendance, isHoliday });
+    return NextResponse.json({ attendance, isHoliday, isWfh });
   } catch (error) {
     console.error('Fetch attendance error:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
@@ -80,7 +82,7 @@ export async function POST(req: NextRequest) {
     await connectDB();
 
     const body = await req.json();
-    const { date, records, isHoliday, employeeId, status, notes } = body;
+    const { date, records, isHoliday, isWfh, employeeId, status, notes } = body;
 
     if (!date) {
       return NextResponse.json({ error: 'Date is required' }, { status: 400 });
@@ -118,7 +120,37 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // 2. Support single employee record update/remove
+    // 2. If admin is marking the entire day as WFH for ALL employees
+    if (isWfh === true || status === 'wfh-all') {
+      const employees = await Employee.find({ userId: session.userId }).lean();
+
+      // Clear existing records for this day
+      await Attendance.deleteMany({
+        userId: session.userId,
+        date: { $gte: rangeStart, $lte: rangeEnd },
+      });
+
+      const wfhRecords = employees.map((emp) => ({
+        userId: session.userId,
+        employeeId: emp._id,
+        date: utcMidnight,
+        status: 'wfh',
+        notes: notes || 'Company WFH',
+      }));
+
+      const result = wfhRecords.length > 0 
+        ? await Attendance.insertMany(wfhRecords)
+        : [];
+
+      return NextResponse.json({ 
+        success: true, 
+        isWfh: true, 
+        count: result.length,
+        attendance: result
+      });
+    }
+
+    // 3. Support single employee record update/remove
     if (employeeId) {
       await Attendance.deleteMany({
         userId: session.userId,
@@ -140,7 +172,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true, message: 'Attendance removed' });
     }
 
-    // 3. Support bulk records for a date
+    // 4. Support bulk records for a date
     if (!records || !Array.isArray(records)) {
       return NextResponse.json({ error: 'Invalid data format' }, { status: 400 });
     }
@@ -165,11 +197,13 @@ export async function POST(req: NextRequest) {
       : [];
 
     const allAreHoliday = result.length > 0 && result.every((r) => r.status === 'holiday');
+    const allAreWfh = result.length > 0 && result.every((r) => r.status === 'wfh');
 
     return NextResponse.json({ 
       success: true, 
       count: result.length, 
       isHoliday: allAreHoliday,
+      isWfh: allAreWfh,
       attendance: result 
     });
   } catch (error: any) {

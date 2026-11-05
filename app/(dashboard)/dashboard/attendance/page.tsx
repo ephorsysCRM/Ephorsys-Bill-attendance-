@@ -12,7 +12,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Calendar } from '@/components/ui/calendar';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { format, isSameMonth, isSameYear } from 'date-fns';
-import { Plus, Calendar as CalendarIcon, Check, X, Clock, User, Save, Loader2, Edit, Trash2, Eye, Sun, AlertCircle, Shield, ShieldAlert, ShieldCheck, KeyRound, Lock, UserCheck } from 'lucide-react';
+import { Plus, Calendar as CalendarIcon, Check, X, Clock, User, Save, Loader2, Edit, Trash2, Eye, Sun, Home, AlertCircle, Shield, ShieldAlert, ShieldCheck, KeyRound, Lock, UserCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 
@@ -27,7 +27,7 @@ interface Employee {
   status?: 'active' | 'terminated';
 }
 
-export type AttendanceStatus = 'full-day' | 'half-day' | 'absent' | 'leave' | 'wfh' | 'holiday';
+export type AttendanceStatus = 'full-day' | 'half-day' | 'leave' | 'wfh' | 'holiday';
 
 interface AttendanceRecord {
   employeeId: string;
@@ -125,6 +125,7 @@ export default function AttendancePage() {
   };
 
   const isDayHoliday = employees.length > 0 && employees.every((emp) => attendance[emp._id]?.status === 'holiday');
+  const isDayWfh = employees.length > 0 && employees.every((emp) => attendance[emp._id]?.status === 'wfh');
 
   const handleToggleDayHoliday = async () => {
     if (employees.length === 0) return;
@@ -166,83 +167,144 @@ export default function AttendancePage() {
     }
   };
 
-  const handleStatusChange = (employeeId: string, status: AttendanceStatus) => {
-    if (status === 'holiday') {
-      // Company-wide holiday applies to ALL employees for that date
-      const currentIsHoliday = attendance[employeeId]?.status === 'holiday';
-      if (currentIsHoliday) {
-        // Toggle off
-        setAttendance({});
-        toast.info(`Cleared holiday for ${format(date, 'dd MMM yyyy')}. Click "Save Attendance" to commit.`);
-      } else {
-        const allHoliday: Record<string, AttendanceRecord> = {};
-        employees.forEach((emp) => {
-          allHoliday[emp._id] = {
-            employeeId: emp._id,
-            status: 'holiday',
-          };
+  const handleToggleDayWfh = async () => {
+    if (employees.length === 0) return;
+    const dateStr = format(date, 'yyyy-MM-dd');
+    const willBeWfh = !isDayWfh;
+    setSaving(true);
+    try {
+      if (willBeWfh) {
+        const res = await fetch('/api/attendance', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            date: dateStr,
+            isWfh: true,
+          }),
         });
-        setAttendance(allHoliday);
-        toast.info(`Marked all employees as Holiday for ${format(date, 'dd MMM yyyy')}. Click "Save Attendance" to commit.`);
+        if (res.ok) {
+          toast.success(`Marked all employees as WFH for ${format(date, 'dd MMM yyyy')}`);
+          await fetchAttendance(date);
+        } else {
+          toast.error('Failed to mark WFH');
+        }
+      } else {
+        const res = await fetch(`/api/attendance?date=${dateStr}`, {
+          method: 'DELETE',
+        });
+        if (res.ok) {
+          toast.success(`Removed WFH for ${format(date, 'dd MMM yyyy')}`);
+          await fetchAttendance(date);
+        } else {
+          toast.error('Failed to remove WFH');
+        }
+      }
+    } catch (error) {
+      console.error('WFH toggle error:', error);
+      toast.error('Failed to update WFH');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Instant Auto-Save on Mark or Switch
+  const handleStatusChange = async (employeeId: string, status: AttendanceStatus) => {
+    const dateStr = format(date, 'yyyy-MM-dd');
+
+    if (status === 'holiday') {
+      const currentIsHoliday = attendance[employeeId]?.status === 'holiday';
+      setSaving(true);
+      try {
+        if (currentIsHoliday) {
+          await fetch(`/api/attendance?date=${dateStr}`, { method: 'DELETE' });
+          toast.success(`Cleared holiday for ${format(date, 'dd MMM yyyy')}`);
+        } else {
+          await fetch('/api/attendance', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ date: dateStr, isHoliday: true }),
+          });
+          toast.success(`Marked all employees as Holiday for ${format(date, 'dd MMM yyyy')}`);
+        }
+        await fetchAttendance(date);
+      } catch {
+        toast.error('Failed to update holiday');
+      } finally {
+        setSaving(false);
       }
       return;
     }
 
+    const current = attendance[employeeId]?.status;
+    const willRemove = current === status;
+    const newStatus = willRemove ? null : status;
+
+    // Optimistic UI update
     setAttendance((prev) => {
-      const current = prev[employeeId]?.status;
-      // If clicking the active status again, toggle off (clear)
-      if (current === status) {
-        const updated = { ...prev };
+      const updated = { ...prev };
+      if (!newStatus) {
         delete updated[employeeId];
-        return updated;
+      } else {
+        updated[employeeId] = { employeeId, status: newStatus };
       }
-      return {
-        ...prev,
-        [employeeId]: {
-          ...prev[employeeId],
-          employeeId,
-          status,
-        },
-      };
+      return updated;
     });
+
+    setSaving(true);
+    try {
+      const res = await fetch('/api/attendance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          employeeId,
+          date: dateStr,
+          status: newStatus || 'none',
+        }),
+      });
+
+      if (!res.ok) {
+        toast.error('Failed to auto-save attendance');
+        await fetchAttendance(date);
+      } else {
+        const empName = employees.find((e) => e._id === employeeId)?.name || 'Employee';
+        if (newStatus) {
+          toast.success(`${empName} marked as ${newStatus}`, { duration: 1500 });
+        } else {
+          toast.info(`${empName} attendance cleared`, { duration: 1500 });
+        }
+      }
+    } catch (error) {
+      console.error('Auto-save error:', error);
+      toast.error('Failed to auto-save attendance');
+      await fetchAttendance(date);
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const handleClearEmployeeAttendance = (employeeId: string) => {
+  const handleClearEmployeeAttendance = async (employeeId: string) => {
+    const dateStr = format(date, 'yyyy-MM-dd');
     setAttendance((prev) => {
       const updated = { ...prev };
       delete updated[employeeId];
       return updated;
     });
-    toast.info('Attendance cleared for this employee. Click "Save Attendance" to commit changes.');
-  };
 
-  const handleSaveAttendance = async () => {
     setSaving(true);
     try {
-      const records = Object.values(attendance).filter((r) => r.status);
-      const dateStr = format(date, 'yyyy-MM-dd');
-      const isAllHoliday = employees.length > 0 && employees.every((emp) => attendance[emp._id]?.status === 'holiday');
-
-      const res = await fetch('/api/attendance', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          date: dateStr,
-          isHoliday: isAllHoliday,
-          records,
-        }),
+      const res = await fetch(`/api/attendance?employeeId=${employeeId}&date=${dateStr}`, {
+        method: 'DELETE',
       });
-
       if (res.ok) {
-        toast.success('Attendance saved successfully');
-        // Instantly refresh from server to ensure state and badges match DB
-        await fetchAttendance(date);
+        const empName = employees.find((e) => e._id === employeeId)?.name || 'Employee';
+        toast.info(`${empName} attendance cleared`, { duration: 1500 });
       } else {
-        toast.error('Failed to save attendance');
+        toast.error('Failed to clear attendance');
+        await fetchAttendance(date);
       }
-    } catch (error) {
-      console.error('Save attendance error:', error);
-      toast.error('Failed to save attendance');
+    } catch {
+      toast.error('Failed to clear attendance');
+      await fetchAttendance(date);
     } finally {
       setSaving(false);
     }
@@ -412,28 +474,58 @@ export default function AttendancePage() {
     }
   };
 
-  // Strictly calculate counts for the respective month ONLY
+  // Helper to extract clean YYYY-MM-DD from any record date regardless of timezone
+  const getRecordKey = (recDate: string | Date): string => {
+    if (!recDate) return '';
+    if (typeof recDate === 'string' && /^\d{4}-\d{2}-\d{2}/.test(recDate)) {
+      return recDate.slice(0, 10);
+    }
+    const d = new Date(recDate);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+
+  const getNormalizedDateFromRecord = (recDate: string | Date): Date => {
+    const key = getRecordKey(recDate);
+    if (key) {
+      const [y, m, d] = key.split('-').map(Number);
+      return new Date(y, m - 1, d);
+    }
+    return new Date(recDate);
+  };
+
+  // Current month isolated records for calendar rendering with deduplication by date
+  const currentMonthRecords = useMemo(() => {
+    const targetYear = currentMonth.getFullYear();
+    const targetMonth = currentMonth.getMonth(); // 0-indexed
+
+    // Deduplicate by date key so duplicate database records never skew the visual calendar or count
+    const map = new Map<string, any>();
+    monthlyAttendance.forEach((rec) => {
+      const key = getRecordKey(rec.date);
+      if (!key) return;
+      const [y, m] = key.split('-').map(Number);
+      if (y === targetYear && m - 1 === targetMonth) {
+        map.set(key, rec);
+      }
+    });
+    return Array.from(map.values());
+  }, [monthlyAttendance, currentMonth]);
+
+  // Strictly calculate counts for the respective month ONLY (No Absent section)
   const calculateCounts = useMemo(() => {
     let present = 0;
     let wfh = 0;
-    let absent = 0;
     let leave = 0;
     let holiday = 0;
     let halfDay = 0;
 
-    const targetYear = currentMonth.getFullYear();
-    const targetMonth = currentMonth.getMonth();
-
-    const isolatedRecords = monthlyAttendance.filter((rec) => {
-      const d = new Date(rec.date);
-      return d.getFullYear() === targetYear && d.getMonth() === targetMonth;
-    });
-
-    isolatedRecords.forEach((rec) => {
+    currentMonthRecords.forEach((rec) => {
       if (rec.status === 'full-day') present++;
       else if (rec.status === 'wfh') wfh++;
       else if (rec.status === 'half-day') halfDay++;
-      else if (rec.status === 'absent') absent++;
       else if (rec.status === 'leave') leave++;
       else if (rec.status === 'holiday') holiday++;
     });
@@ -441,26 +533,15 @@ export default function AttendancePage() {
     return {
       present: present + halfDay * 0.5,
       wfh,
-      absent,
       leave,
       holiday,
       halfDay,
-      total: isolatedRecords.length,
+      total: currentMonthRecords.length,
     };
-  }, [monthlyAttendance, currentMonth]);
-
-  // Current month isolated records for calendar rendering
-  const currentMonthRecords = useMemo(() => {
-    const targetYear = currentMonth.getFullYear();
-    const targetMonth = currentMonth.getMonth();
-    return monthlyAttendance.filter((rec) => {
-      const d = new Date(rec.date);
-      return d.getFullYear() === targetYear && d.getMonth() === targetMonth;
-    });
-  }, [monthlyAttendance, currentMonth]);
+  }, [currentMonthRecords]);
 
   const markedDateStrings = useMemo(() => {
-    return new Set(currentMonthRecords.map((r) => format(new Date(r.date), 'yyyy-MM-dd')));
+    return new Set(currentMonthRecords.map((r) => getRecordKey(r.date)));
   }, [currentMonthRecords]);
 
   // Handle setting or removing attendance directly from the dialog
@@ -539,8 +620,6 @@ export default function AttendancePage() {
         return <Badge className="bg-amber-500 text-white hover:bg-amber-600">Half Day</Badge>;
       case 'wfh':
         return <Badge className="bg-purple-500 text-white hover:bg-purple-600">WFH</Badge>;
-      case 'absent':
-        return <Badge className="bg-red-500 text-white hover:bg-red-600">Absent</Badge>;
       case 'leave':
         return <Badge className="bg-blue-500 text-white hover:bg-blue-600">Leave</Badge>;
       case 'holiday':
@@ -553,7 +632,7 @@ export default function AttendancePage() {
   // Check dialog date record
   const selectedDialogDateStr = selectedDialogDate ? format(selectedDialogDate, 'yyyy-MM-dd') : '';
   const selectedDialogRecord = currentMonthRecords.find(
-    (r) => format(new Date(r.date), 'yyyy-MM-dd') === selectedDialogDateStr
+    (r) => getRecordKey(r.date) === selectedDialogDateStr
   );
   const isSelectedDialogSunday = selectedDialogDate?.getDay() === 0;
 
@@ -599,9 +678,32 @@ export default function AttendancePage() {
                     ✨ Company Holiday
                   </Badge>
                 )}
+                {isDayWfh && (
+                  <Badge className="bg-purple-600 text-white hover:bg-purple-700 font-semibold px-2.5 py-1">
+                    🏠 Company WFH
+                  </Badge>
+                )}
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                {/* Global WFH Button */}
+                <Button
+                  type="button"
+                  variant={isDayWfh ? "default" : "outline"}
+                  onClick={handleToggleDayWfh}
+                  disabled={saving}
+                  className={cn(
+                    "transition-all font-medium",
+                    isDayWfh 
+                      ? "bg-purple-600 hover:bg-purple-700 text-white font-semibold shadow-sm" 
+                      : "border-purple-500/40 text-purple-400 hover:bg-purple-500/10 hover:border-purple-500/60"
+                  )}
+                >
+                  <Home className="w-4 h-4 mr-2" />
+                  {isDayWfh ? "WFH (Marked for All)" : "Mark Day as WFH"}
+                </Button>
+
+                {/* Global Holiday Button */}
                 <Button
                   type="button"
                   variant={isDayHoliday ? "default" : "outline"}
@@ -618,10 +720,20 @@ export default function AttendancePage() {
                   {isDayHoliday ? "Holiday (Marked for All)" : "Mark Day as Holiday"}
                 </Button>
 
-                <Button onClick={handleSaveAttendance} disabled={saving} className="bg-primary hover:bg-primary/90 text-primary-foreground">
-                  {saving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
-                  Save Attendance
-                </Button>
+                {/* Auto-Saved Live Status Indicator */}
+                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-400 font-medium">
+                  {saving ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Saving...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-3.5 h-3.5" />
+                      <span>Auto-saved</span>
+                    </>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -710,17 +822,6 @@ export default function AttendancePage() {
                                 onClick={() => handleStatusChange(emp._id, 'leave')}
                               >
                                 Leave
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant={currentStatus === 'absent' ? 'default' : 'outline'}
-                                className={cn(
-                                  'h-8 px-2.5 text-xs font-medium',
-                                  currentStatus === 'absent' && 'bg-red-500 hover:bg-red-600 text-white'
-                                )}
-                                onClick={() => handleStatusChange(emp._id, 'absent')}
-                              >
-                                Absent
                               </Button>
                               <Button
                                 size="sm"
@@ -1157,12 +1258,11 @@ export default function AttendancePage() {
                       }}
                       showOutsideDays={false}
                       modifiers={{
-                        present: currentMonthRecords.filter((r) => r.status === 'full-day').map((r) => new Date(r.date)),
-                        halfDay: currentMonthRecords.filter((r) => r.status === 'half-day').map((r) => new Date(r.date)),
-                        wfh: currentMonthRecords.filter((r) => r.status === 'wfh').map((r) => new Date(r.date)),
-                        absent: currentMonthRecords.filter((r) => r.status === 'absent').map((r) => new Date(r.date)),
-                        leave: currentMonthRecords.filter((r) => r.status === 'leave').map((r) => new Date(r.date)),
-                        holiday: currentMonthRecords.filter((r) => r.status === 'holiday').map((r) => new Date(r.date)),
+                        present: currentMonthRecords.filter((r) => r.status === 'full-day').map((r) => getNormalizedDateFromRecord(r.date)),
+                        halfDay: currentMonthRecords.filter((r) => r.status === 'half-day').map((r) => getNormalizedDateFromRecord(r.date)),
+                        wfh: currentMonthRecords.filter((r) => r.status === 'wfh').map((r) => getNormalizedDateFromRecord(r.date)),
+                        leave: currentMonthRecords.filter((r) => r.status === 'leave').map((r) => getNormalizedDateFromRecord(r.date)),
+                        holiday: currentMonthRecords.filter((r) => r.status === 'holiday').map((r) => getNormalizedDateFromRecord(r.date)),
                         sunday: (d: Date) =>
                           d.getDay() === 0 &&
                           d.getFullYear() === currentMonth.getFullYear() &&
@@ -1173,7 +1273,6 @@ export default function AttendancePage() {
                         present: { backgroundColor: '#10b981', color: 'white', borderRadius: '50%' },
                         halfDay: { backgroundColor: '#f59e0b', color: 'white', borderRadius: '50%' },
                         wfh: { backgroundColor: '#a855f7', color: 'white', borderRadius: '50%' },
-                        absent: { backgroundColor: '#ef4444', color: 'white', borderRadius: '50%' },
                         leave: { backgroundColor: '#3b82f6', color: 'white', borderRadius: '50%' },
                         holiday: { backgroundColor: '#06b6d4', color: 'white', borderRadius: '50%' },
                         sunday: { backgroundColor: '#f43f5e', color: 'white', borderRadius: '50%' },
@@ -1270,20 +1369,6 @@ export default function AttendancePage() {
                           disabled={actionLoading}
                           className={cn(
                             "h-8 px-3 text-xs font-medium transition-all",
-                            selectedDialogRecord?.status === 'absent'
-                              ? "bg-red-500 text-white border-red-500 font-semibold shadow-sm"
-                              : "bg-red-500/10 text-red-400 border-red-500/30 hover:bg-red-500 hover:text-white"
-                          )}
-                          onClick={() => handleDialogUpdateStatus('absent')}
-                        >
-                          Absent
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={actionLoading}
-                          className={cn(
-                            "h-8 px-3 text-xs font-medium transition-all",
                             selectedDialogRecord?.status === 'holiday'
                               ? "bg-cyan-500 text-white border-cyan-500 font-semibold shadow-sm"
                               : "bg-cyan-500/10 text-cyan-400 border-cyan-500/30 hover:bg-cyan-500 hover:text-white"
@@ -1320,7 +1405,7 @@ export default function AttendancePage() {
                     <Loader2 className="w-6 h-6 animate-spin text-primary" />
                   </div>
                 ) : (
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                     <Card className="p-3.5 bg-background/50 border-emerald-500/20">
                       <div className="text-xs text-muted-foreground">Present</div>
                       <div className="text-2xl font-bold text-emerald-500">{calculateCounts.present}</div>
@@ -1330,11 +1415,6 @@ export default function AttendancePage() {
                       <div className="text-xs text-muted-foreground">WFH</div>
                       <div className="text-2xl font-bold text-purple-500">{calculateCounts.wfh}</div>
                       <div className="text-[11px] text-muted-foreground">Work From Home</div>
-                    </Card>
-                    <Card className="p-3.5 bg-background/50 border-red-500/20">
-                      <div className="text-xs text-muted-foreground">Absent</div>
-                      <div className="text-2xl font-bold text-red-500">{calculateCounts.absent}</div>
-                      <div className="text-[11px] text-muted-foreground">Full Day Absent</div>
                     </Card>
                     <Card className="p-3.5 bg-background/50 border-blue-500/20">
                       <div className="text-xs text-muted-foreground">Leave</div>
@@ -1346,7 +1426,7 @@ export default function AttendancePage() {
                       <div className="text-2xl font-bold text-cyan-500">{calculateCounts.holiday}</div>
                       <div className="text-[11px] text-muted-foreground">Public / Fest. Holidays</div>
                     </Card>
-                    <Card className="p-3.5 bg-background/50 border-sidebar-border">
+                    <Card className="p-3.5 bg-background/50 border-sidebar-border col-span-2 sm:col-span-1">
                       <div className="text-xs text-muted-foreground">Total Marked</div>
                       <div className="text-2xl font-bold text-foreground">{calculateCounts.total}</div>
                       <div className="text-[11px] text-muted-foreground">Days Recorded in Month</div>
@@ -1369,10 +1449,6 @@ export default function AttendancePage() {
                     <div className="flex items-center gap-2">
                       <span className="w-3 h-3 bg-purple-500 rounded-full shrink-0"></span>
                       <span>WFH</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="w-3 h-3 bg-red-500 rounded-full shrink-0"></span>
-                      <span>Absent</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="w-3 h-3 bg-blue-500 rounded-full shrink-0"></span>

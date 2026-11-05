@@ -33,7 +33,7 @@ export function createToken(payload: Omit<JWTPayload, 'iat' | 'exp'>): string {
   const header = base64url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
   const now = Math.floor(Date.now() / 1000);
   const fullPayload = base64url(JSON.stringify({ ...payload, iat: now, exp: now + 604800 }));
-  
+
   const signature = base64url(
     createHmac('sha256', SECRET).update(`${header}.${fullPayload}`).digest('base64')
   );

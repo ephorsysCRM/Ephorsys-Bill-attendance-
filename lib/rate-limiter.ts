@@ -33,6 +33,7 @@ export interface RateLimitResult {
   resetInSeconds: number;
 }
 
+
 /**
  * Check and enforce rate limits for given key
  */
@@ -76,7 +77,7 @@ export function checkRateLimit(options: RateLimitOptions): RateLimitResult {
     resetInSeconds,
   };
 }
-
+ 
 /**
  * Extract client IP address safely from NextRequest headers
  */
